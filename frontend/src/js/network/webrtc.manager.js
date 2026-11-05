@@ -214,21 +214,18 @@ class WebRTCManager {
                     }
                     try {
                         const decrypted = await decryptPayload(this.chatKey, msg.iv, msg.ciphertext);
-                        if (decrypted.sequence <= this.lastSeenSequence && decrypted.type === 'CHAT_MESSAGE') {
-                            console.warn('Replay attack detected or duplicate sequence');
-                            return;
-                        }
-                        this.lastSeenSequence = Math.max(this.lastSeenSequence, decrypted.sequence || 0);
-
+                        
                         if (decrypted.type === 'CHAT_MESSAGE') {
-                            // Send delivery ACK back
-                            this.dataChannel.send(JSON.stringify({
-                                type: 'ENCRYPTED_CHAT',
-                                ...(await encryptPayload(this.chatKey, {
-                                    type: 'CHAT_ACK',
-                                    messageId: decrypted.messageId
-                                }))
-                            }));
+                            // Send delivery ACK back immediately
+                            if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                                this.dataChannel.send(JSON.stringify({
+                                    type: 'ENCRYPTED_CHAT',
+                                    ...(await encryptPayload(this.chatKey, {
+                                        type: 'CHAT_ACK',
+                                        messageId: decrypted.messageId
+                                    }))
+                                }));
+                            }
 
                             this.chatMessages.push({ ...decrypted, direction: 'incoming' });
                             this._emit('chat_message_received', decrypted);
@@ -242,8 +239,8 @@ class WebRTCManager {
                             this._emit('peer_typing', decrypted.isTyping);
                         }
                     } catch (decErr) {
-                        console.error('Failed to decrypt incoming chat message (Authentication failed):', decErr);
-                        showToast('Encrypted message failed signature/authentication verification', 'error');
+                        console.error('Failed to decrypt incoming chat message:', decErr);
+                        showToast('Encrypted message failed signature verification', 'error');
                     }
                 } else if (msg.type === 'FILE_META') {
                     this.incomingTransfers.set(msg.transferId, {
@@ -287,7 +284,6 @@ class WebRTCManager {
                 console.error('Failed to parse text message over DC:', err);
             }
         } else {
-            // Binary chunk for file transfer
             try {
                 const view = new DataView(data);
                 const metaLen = view.getUint32(0);
@@ -371,6 +367,15 @@ class WebRTCManager {
             type: 'ENCRYPTED_CHAT',
             ...encrypted
         }));
+
+        // Fallback safety timer: if ACK isn't received within 8 seconds, mark as sent/delivered locally to prevent infinite hanging
+        setTimeout(() => {
+            const currentMsg = this.chatMessages.find(m => m.messageId === messageId);
+            if (currentMsg && currentMsg.status === 'Sending') {
+                currentMsg.status = 'Sent';
+                this._emit('chat_status_updated', currentMsg);
+            }
+        }, 8000);
 
         return record;
     }

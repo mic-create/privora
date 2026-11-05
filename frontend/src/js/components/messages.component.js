@@ -61,7 +61,6 @@ export function renderMessages() {
                         🔒 All messages are end-to-end encrypted and destroyed on session disconnect.
                     </div>
                 </div>
-                <!-- Render existing chat messages -->
                 ${renderMessagesList()}
             </div>
 
@@ -88,10 +87,8 @@ export function renderMessages() {
     const messagesContainer = container.querySelector('#chat-messages-container');
     const typingArea = container.querySelector('#typing-indicator-area');
 
-    // Scroll to bottom of chat
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-    // Event Handlers for chat
     chatInput.addEventListener('input', () => {
         rtcManager.sendTypingIndicator(true);
         clearTimeout(typingTimeout);
@@ -120,18 +117,9 @@ export function renderMessages() {
         showToast('Conversation cleared', 'info');
     });
 
-    // WebRTC Manager event listeners for real-time updates
-    rtcManager.on('chat_message_received', () => {
-        refreshChatDOM(container);
-    });
-
-    rtcManager.on('chat_message_sent', () => {
-        refreshChatDOM(container);
-    });
-
-    rtcManager.on('chat_status_updated', () => {
-        refreshChatDOM(container);
-    });
+    rtcManager.on('chat_message_received', () => refreshChatDOM(container));
+    rtcManager.on('chat_message_sent', () => refreshChatDOM(container));
+    rtcManager.on('chat_status_updated', () => refreshChatDOM(container));
 
     rtcManager.on('peer_typing', (isTyping) => {
         if (typingArea) {
