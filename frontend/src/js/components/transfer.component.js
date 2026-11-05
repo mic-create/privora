@@ -3,11 +3,14 @@ import { showToast } from '../utils/notifier.js';
 import { rtcManager } from '../network/webrtc.manager.js';
 
 let selectedFiles = [];
+let activeTransfersList = [];
+let pendingIncomingTransfers = [];
+let completedTransfersList = [];
 
 export function renderTransfer() {
     const state = getState();
     const container = document.createElement('div');
-    container.className = 'space-y-6 animate-fade-in max-w-7xl mx-auto';
+    container.className = 'space-y-6 animate-fade-in max-w-7xl mx-auto pb-12';
 
     container.innerHTML = `
         <!-- Session Controls Header -->
@@ -17,7 +20,7 @@ export function renderTransfer() {
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 </div>
                 <div>
-                    <h3 class="text-base font-semibold text-white">Peer-to-Peer Session Room</h3>
+                    <h3 class="text-base font-semibold text-white">Peer-to-Peer Encrypted File Transfer</h3>
                     <p class="text-xs text-slate-400 font-mono mt-0.5" id="transfer-room-status">Status: ${state.session.isConnected ? 'Connected • Room Active' : 'Disconnected • Ready'}</p>
                 </div>
             </div>
@@ -34,36 +37,57 @@ export function renderTransfer() {
             </div>
         </div>
 
+        <!-- Incoming Transfer Notification Banner / Modal Area -->
+        <div id="incoming-banner-container" class="space-y-3"></div>
+
         <!-- Main Transfer Workspace -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            <!-- Drag and Drop Dropzone (2 Cols) -->
-            <div class="lg:col-span-2 bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6 flex flex-col justify-between">
-                <div>
+            <!-- Drag and Drop Dropzone & Queue (2 Cols) -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6">
                     <div class="flex items-center justify-between mb-4">
                         <h4 class="text-sm font-semibold text-white">Selected Files & Dropzone</h4>
                         <span id="file-counter" class="text-xs text-slate-400 font-mono">${selectedFiles.length} files selected</span>
                     </div>
 
                     <!-- Dropzone Target -->
-                    <div id="dropzone" class="border-2 border-dashed border-navy-700 hover:border-accent-500/60 transition-colors rounded-2xl p-8 lg:p-12 text-center bg-navy-950/40 cursor-pointer flex flex-col items-center justify-center">
+                    <div id="dropzone" class="border-2 border-dashed border-navy-700 hover:border-accent-500/60 transition-colors rounded-2xl p-8 lg:p-10 text-center bg-navy-950/40 cursor-pointer flex flex-col items-center justify-center">
                         <div class="h-14 w-14 rounded-2xl bg-navy-800/80 border border-navy-700 flex items-center justify-center text-accent-400 mb-4 shadow-inner">
                             <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                         </div>
                         <p class="text-sm font-medium text-slate-200">Drag and drop files here, or <span class="text-accent-400 underline underline-offset-2">browse</span></p>
-                        <p class="text-xs text-slate-500 mt-1.5 font-mono">Transmitted securely over WebRTC DataChannel</p>
+                        <p class="text-xs text-slate-500 mt-1.5 font-mono">Encrypted locally via Web Crypto AES-GCM before transmission</p>
                         <input type="file" id="file-input" multiple class="hidden">
+                    </div>
+
+                    <!-- Selected Files Queue List -->
+                    <div class="mt-6">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Transfer Queue</span>
+                            <div class="flex gap-3">
+                                <button id="btn-clear-queue" class="text-xs text-slate-400 hover:text-red-400 transition-colors">Clear Queue</button>
+                            </div>
+                        </div>
+                        <div id="file-queue-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            ${selectedFiles.length === 0 ? `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>` : ''}
+                        </div>
+                        <div class="mt-4">
+                            <button id="btn-send-files" ${selectedFiles.length === 0 || !state.session.isConnected ? 'disabled' : ''} class="w-full py-3 bg-accent-600 hover:bg-accent-500 disabled:bg-accent-600/30 disabled:text-white/40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                                Send Files (Encrypted P2P)
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Selected Files List Preview -->
-                <div class="mt-6">
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Queue & Status</span>
-                        <button id="btn-clear-queue" class="text-xs text-slate-400 hover:text-red-400 transition-colors">Clear Queue</button>
-                    </div>
-                    <div id="file-queue-list" class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                        ${selectedFiles.length === 0 ? `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>` : ''}
+                <!-- Active & Completed Transfers Panel -->
+                <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6">
+                    <h4 class="text-sm font-semibold text-white mb-4">Active & Completed Transfers</h4>
+                    <div id="transfers-progress-container" class="space-y-3">
+                        <div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">
+                            No active file transfers in progress.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -87,8 +111,8 @@ export function renderTransfer() {
                             <span id="datachannel-state" class="text-slate-400">${rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open' ? 'Open (Active)' : 'Standby'}</span>
                         </div>
                         <div class="flex justify-between py-2">
-                            <span class="text-slate-400">Transport:</span>
-                            <span id="transport-state" class="text-slate-400">STUN / P2P</span>
+                            <span class="text-slate-400">Encryption:</span>
+                            <span class="text-emerald-400">AES-GCM-256</span>
                         </div>
                     </div>
                     <div class="mt-5 space-y-2">
@@ -105,10 +129,10 @@ export function renderTransfer() {
                         <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                         </div>
-                        <h4 class="text-sm font-semibold text-white">Persistent Session</h4>
+                        <h4 class="text-sm font-semibold text-white">E2EE Verified</h4>
                     </div>
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        WebRTC tunnels remain active across navigation and file selection.
+                        Files are encrypted in browser memory, streamed over authenticated WebRTC DataChannels, and decrypted locally by the recipient.
                     </p>
                 </div>
             </div>
@@ -116,48 +140,47 @@ export function renderTransfer() {
         </div>
     `;
 
-    // Bind rtcManager event listeners safely without duplicating listeners
+    // WebRTC Manager event bindings for transfers
     rtcManager.on('room_created', (roomId) => {
         updateState(s => ({ ...s, session: { ...s.session, roomId, isConnected: true, isHost: true } }));
-        const statusEl = document.getElementById('transfer-room-status');
-        const roomEl = document.getElementById('info-room-id');
-        const peerEl = document.getElementById('peer-state');
-        const leaveBtn = document.getElementById('btn-leave-room');
-        if (statusEl) statusEl.textContent = `Status: Room Created • Waiting for peer...`;
-        if (roomEl) roomEl.textContent = roomId;
-        if (peerEl) { peerEl.textContent = 'Waiting for Peer'; peerEl.className = 'text-accent-400 font-semibold'; }
-        if (leaveBtn) leaveBtn.classList.remove('hidden');
+        refreshUIState();
+        showToast(`Room created successfully: ${roomId}`, 'success');
     });
 
     rtcManager.on('room_joined', (roomId) => {
         updateState(s => ({ ...s, session: { ...s.session, roomId, isConnected: true, isHost: false } }));
-        const statusEl = document.getElementById('transfer-room-status');
-        const roomEl = document.getElementById('info-room-id');
-        const peerEl = document.getElementById('peer-state');
-        const leaveBtn = document.getElementById('btn-leave-room');
-        if (statusEl) statusEl.textContent = `Status: Joined Room • Connecting...`;
-        if (roomEl) roomEl.textContent = roomId;
-        if (peerEl) { peerEl.textContent = 'Connecting...'; peerEl.className = 'text-accent-400 font-semibold'; }
-        if (leaveBtn) leaveBtn.classList.remove('hidden');
+        refreshUIState();
+        showToast(`Joined room: ${roomId}`, 'success');
     });
 
     rtcManager.on('datachannel_open', () => {
-        const dcEl = document.getElementById('datachannel-state');
-        const peerEl = document.getElementById('peer-state');
-        if (dcEl) { dcEl.textContent = 'Open (Active)'; dcEl.className = 'text-emerald-400 font-semibold'; }
-        if (peerEl) { peerEl.textContent = 'CONNECTED'; peerEl.className = 'text-emerald-400 font-semibold'; }
+        refreshUIState();
+        showToast('DataChannel operational for secure transfers', 'success');
     });
 
-    // Render queue if files exist
+    rtcManager.on('incoming_transfer', (meta) => {
+        pendingIncomingTransfers.push(meta);
+        renderIncomingBanners(container);
+        showToast(`Incoming file transfer: ${meta.name}`, 'info');
+    });
+
+    rtcManager.on('transfer_progress', (transfer) => {
+        upsertTransferRecord(container, transfer);
+    });
+
+    rtcManager.on('transfer_completed', (transfer) => {
+        upsertTransferRecord(container, transfer);
+        completedTransfersList.push(transfer);
+    });
+
     if (selectedFiles.length > 0) {
-        renderQueueDOM();
+        renderQueueDOM(container);
     }
 
-    // UI Event Bindings
+    // UI Event Handlers
     container.querySelector('#btn-create-room').addEventListener('click', async () => {
         try {
             await rtcManager.createRoom();
-            showToast('Room created successfully', 'success');
         } catch (err) {
             showToast('Failed to create room', 'error');
         }
@@ -168,7 +191,6 @@ export function renderTransfer() {
         if (roomCode) {
             try {
                 await rtcManager.joinRoom(roomCode.toUpperCase().trim());
-                showToast(`Joined room ${roomCode.toUpperCase()}`, 'success');
             } catch (err) {
                 showToast('Failed to join room', 'error');
             }
@@ -180,9 +202,10 @@ export function renderTransfer() {
         leaveBtn.addEventListener('click', () => {
             rtcManager.closeConnection();
             selectedFiles = [];
+            pendingIncomingTransfers = [];
             updateState(s => ({ ...s, session: { ...s.session, roomId: null, isConnected: false, isHost: false } }));
             showToast('Left session room', 'info');
-            renderTransfer(); // Refresh view
+            renderTransfer();
         });
     }
 
@@ -198,7 +221,7 @@ export function renderTransfer() {
         });
     });
 
-    // File Dropzone & Input handling
+    // File Drag & Drop / Selection
     const dropzone = container.querySelector('#dropzone');
     const fileInput = container.querySelector('#file-input');
 
@@ -210,7 +233,8 @@ export function renderTransfer() {
         dropzone.classList.remove('border-accent-500', 'bg-accent-500/5');
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             selectedFiles = [...selectedFiles, ...Array.from(e.dataTransfer.files)];
-            renderQueueDOM();
+            renderQueueDOM(container);
+            refreshUIState();
             showToast(`Queued ${e.dataTransfer.files.length} file(s)`, 'success');
         }
     });
@@ -218,40 +242,194 @@ export function renderTransfer() {
     fileInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files.length > 0) {
             selectedFiles = [...selectedFiles, ...Array.from(e.target.files)];
-            renderQueueDOM();
+            renderQueueDOM(container);
+            refreshUIState();
             showToast(`Queued ${e.target.files.length} file(s)`, 'success');
         }
     });
 
     container.querySelector('#btn-clear-queue').addEventListener('click', () => {
         selectedFiles = [];
-        renderQueueDOM();
+        renderQueueDOM(container);
+        refreshUIState();
         showToast('Queue cleared', 'info');
     });
 
-    function renderQueueDOM() {
-        const queueList = container.querySelector('#file-queue-list');
-        const counter = container.querySelector('#file-counter');
-        if (counter) counter.textContent = `${selectedFiles.length} files selected`;
-        if (!queueList) return;
-
-        if (selectedFiles.length === 0) {
-            queueList.innerHTML = `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>`;
-            return;
-        }
-
-        queueList.innerHTML = selectedFiles.map((file, idx) => `
-            <div class="flex items-center justify-between p-3 bg-navy-950/60 border border-navy-800 rounded-xl">
-                <div class="flex items-center gap-3 overflow-hidden">
-                    <div class="h-8 w-8 rounded-lg bg-navy-800 flex items-center justify-center text-accent-400 flex-shrink-0 font-mono text-[10px]">FILE</div>
-                    <div class="overflow-hidden">
-                        <p class="text-xs font-medium text-slate-200 truncate">${file.name}</p>
-                        <p class="text-[10px] text-slate-400 font-mono">${(file.size / (1024 * 1024)).toFixed(2)} MB • Ready</p>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-    }
+    container.querySelector('#btn-send-files').addEventListener('click', async () => {
+        if (selectedFiles.length === 0) return;
+        showToast('Encrypting & initiating file transfer...', 'info');
+        const filesToSend = [...selectedFiles];
+        selectedFiles = [];
+        renderQueueDOM(container);
+        refreshUIState();
+        await rtcManager.sendFiles(filesToSend);
+    });
 
     return container;
+}
+
+function renderQueueDOM(container) {
+    const queueList = container.querySelector('#file-queue-list');
+    const counter = container.querySelector('#file-counter');
+    if (counter) counter.textContent = `${selectedFiles.length} files selected`;
+    if (!queueList) return;
+
+    if (selectedFiles.length === 0) {
+        queueList.innerHTML = `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>`;
+        return;
+    }
+
+    queueList.innerHTML = selectedFiles.map((file, idx) => `
+        <div class="flex items-center justify-between p-3 bg-navy-950/60 border border-navy-800 rounded-xl">
+            <div class="flex items-center gap-3 overflow-hidden">
+                <div class="h-8 w-8 rounded-lg bg-navy-800 flex items-center justify-center text-accent-400 flex-shrink-0 font-mono text-[10px]">FILE</div>
+                <div class="overflow-hidden">
+                    <p class="text-xs font-medium text-slate-200 truncate">${file.name}</p>
+                    <p class="text-[10px] text-slate-400 font-mono">${(file.size / (1024 * 1024)).toFixed(2)} MB • Ready</p>
+                </div>
+            </div>
+            <button data-index="${idx}" class="remove-queue-item text-slate-500 hover:text-red-400 p-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+    `).join('');
+
+    queueList.querySelectorAll('.remove-queue-item').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.dataset.index);
+            selectedFiles.splice(idx, 1);
+            renderQueueDOM(container);
+            refreshUIState();
+        });
+    });
+}
+
+function renderIncomingBanners(container) {
+    const bannerContainer = container.querySelector('#incoming-banner-container');
+    if (!bannerContainer) return;
+
+    bannerContainer.innerHTML = pendingIncomingTransfers.map(meta => `
+        <div class="bg-navy-900 border border-accent-500/50 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fade-in">
+            <div class="flex items-center gap-3">
+                <div class="h-10 w-10 rounded-xl bg-accent-500/10 border border-accent-500/30 flex items-center justify-center text-accent-400 font-mono text-xs">IN</div>
+                <div>
+                    <p class="text-xs font-semibold text-white">Incoming Encrypted File Transfer</p>
+                    <p class="text-xs text-slate-300 font-medium mt-0.5">${meta.name} <span class="text-slate-400 font-mono">(${(meta.size / (1024 * 1024)).toFixed(2)} MB)</span></p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 w-full md:w-auto">
+                <button data-id="${meta.transferId}" class="accept-transfer-btn flex-1 md:flex-none px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-xl transition-all">
+                    Accept & Download
+                </button>
+                <button data-id="${meta.transferId}" class="decline-transfer-btn flex-1 md:flex-none px-4 py-2 bg-navy-800 hover:bg-navy-700 text-slate-300 text-xs font-medium rounded-xl border border-navy-700 transition-all">
+                    Decline
+                </button>
+            </div>
+        </div>
+    `).join('');
+
+    bannerContainer.querySelectorAll('.accept-transfer-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = e.currentTarget.dataset.id;
+            rtcManager.acceptTransfer(id);
+            pendingIncomingTransfers = pendingIncomingTransfers.filter(m => m.transferId !== id);
+            renderIncomingBanners(container);
+            showToast('Transfer accepted. Receiving encrypted chunks...', 'success');
+        });
+    });
+
+    bannerContainer.querySelectorAll('.decline-transfer-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = e.currentTarget.dataset.id;
+            rtcManager.declineTransfer(id);
+            pendingIncomingTransfers = pendingIncomingTransfers.filter(m => m.transferId !== id);
+            renderIncomingBanners(container);
+            showToast('Transfer declined', 'info');
+        });
+    });
+}
+
+function upsertTransferRecord(container, transfer) {
+    const progressContainer = container.querySelector('#transfers-progress-container');
+    if (!progressContainer) return;
+
+    // Remove placeholder if present
+    if (progressContainer.querySelector('.text-center')) {
+        progressContainer.innerHTML = '';
+    }
+
+    let itemEl = progressContainer.querySelector(`[data-transfer-id="${transfer.transferId}"]`);
+    if (!itemEl) {
+        itemEl = document.createElement('div');
+        itemEl.dataset.transferId = transfer.transferId;
+        itemEl.className = 'p-4 bg-navy-950/60 border border-navy-800 rounded-xl space-y-3';
+        progressContainer.appendChild(itemEl);
+    }
+
+    const isCompleted = transfer.status === 'completed';
+    const progressVal = transfer.progress || 0;
+
+    let actionButtonHtml = '';
+    if (isCompleted && transfer.blob) {
+        const url = URL.createObjectURL(transfer.blob);
+        actionButtonHtml = `<a href="${url}" download="${transfer.name}" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-all">Save File</a>`;
+    } else {
+        actionButtonHtml = `<button data-id="${transfer.transferId}" class="cancel-transfer-btn text-xs text-red-400 hover:text-red-300">Cancel</button>`;
+    }
+
+    itemEl.innerHTML = `
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3 overflow-hidden">
+                <div class="h-8 w-8 rounded-lg bg-navy-800 flex items-center justify-center text-accent-400 flex-shrink-0 font-mono text-[10px]">
+                    ${isCompleted ? '✓' : 'TR'}
+                </div>
+                <div class="overflow-hidden">
+                    <p class="text-xs font-medium text-slate-200 truncate">${transfer.name}</p>
+                    <p class="text-[10px] text-slate-400 font-mono uppercase">${transfer.status} • ${progressVal}%</p>
+                </div>
+            </div>
+            <div>${actionButtonHtml}</div>
+        </div>
+        <div class="w-full bg-navy-900 rounded-full h-1.5 overflow-hidden border border-navy-800">
+            <div class="bg-accent-500 h-full transition-all duration-200" style="width: ${progressVal}%"></div>
+        </div>
+    `;
+
+    itemEl.querySelectorAll('.cancel-transfer-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = e.currentTarget.dataset.id;
+            rtcManager.cancelTransfer(id);
+            itemEl.remove();
+            showToast('Transfer cancelled', 'info');
+        });
+    });
+}
+
+function refreshUIState() {
+    const state = getState();
+    const statusEl = document.getElementById('transfer-room-status');
+    const roomEl = document.getElementById('info-room-id');
+    const peerEl = document.getElementById('peer-state');
+    const dcEl = document.getElementById('datachannel-state');
+    const leaveBtn = document.getElementById('btn-leave-room');
+    const sendBtn = document.getElementById('btn-send-files');
+
+    if (statusEl) statusEl.textContent = `Status: ${state.session.isConnected ? 'Connected • Room Active' : 'Disconnected • Ready'}`;
+    if (roomEl) roomEl.textContent = state.session.roomId || 'None';
+    if (peerEl) {
+        peerEl.textContent = state.session.isConnected ? 'Connected' : 'Not Connected';
+        peerEl.className = state.session.isConnected ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold';
+    }
+    if (dcEl) {
+        const isOpen = rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
+        dcEl.textContent = isOpen ? 'Open (Active)' : 'Standby';
+        dcEl.className = isOpen ? 'text-emerald-400 font-semibold' : 'text-slate-400';
+    }
+    if (leaveBtn) {
+        if (state.session.isConnected) leaveBtn.classList.remove('hidden');
+        else leaveBtn.classList.add('hidden');
+    }
+    if (sendBtn) {
+        sendBtn.disabled = selectedFiles.length === 0 || !state.session.isConnected || !(rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open');
+    }
 }
