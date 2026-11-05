@@ -3,9 +3,8 @@ import { showToast } from '../utils/notifier.js';
 import { rtcManager } from '../network/webrtc.manager.js';
 
 let selectedFiles = [];
-let activeTransfersList = [];
 let pendingIncomingTransfers = [];
-let completedTransfersList = [];
+let activeTransfersList = [];
 
 export function renderTransfer() {
     const state = getState();
@@ -37,7 +36,7 @@ export function renderTransfer() {
             </div>
         </div>
 
-        <!-- Incoming Transfer Notification Banner / Modal Area -->
+        <!-- Incoming Transfer Notification Banner Area -->
         <div id="incoming-banner-container" class="space-y-3"></div>
 
         <!-- Main Transfer Workspace -->
@@ -57,7 +56,7 @@ export function renderTransfer() {
                             <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                         </div>
                         <p class="text-sm font-medium text-slate-200">Drag and drop files here, or <span class="text-accent-400 underline underline-offset-2">browse</span></p>
-                        <p class="text-xs text-slate-500 mt-1.5 font-mono">Encrypted locally via Web Crypto AES-GCM before transmission</p>
+                        <p class="text-xs text-slate-500 mt-1.5 font-mono">Encrypted via AES-GCM-256 with SHA-256 integrity verification</p>
                         <input type="file" id="file-input" multiple class="hidden">
                     </div>
 
@@ -65,9 +64,7 @@ export function renderTransfer() {
                     <div class="mt-6">
                         <div class="flex items-center justify-between mb-3">
                             <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Transfer Queue</span>
-                            <div class="flex gap-3">
-                                <button id="btn-clear-queue" class="text-xs text-slate-400 hover:text-red-400 transition-colors">Clear Queue</button>
-                            </div>
+                            <button id="btn-clear-queue" class="text-xs text-slate-400 hover:text-red-400 transition-colors">Clear Queue</button>
                         </div>
                         <div id="file-queue-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
                             ${selectedFiles.length === 0 ? `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>` : ''}
@@ -129,10 +126,10 @@ export function renderTransfer() {
                         <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                         </div>
-                        <h4 class="text-sm font-semibold text-white">E2EE Verified</h4>
+                        <h4 class="text-sm font-semibold text-white">SHA-256 Verified</h4>
                     </div>
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Files are encrypted in browser memory, streamed over authenticated WebRTC DataChannels, and decrypted locally by the recipient.
+                        Transfers include cryptographic hash verification. Shared WebRTC sessions remain open across multiple sequential file transfers.
                     </p>
                 </div>
             </div>
@@ -140,7 +137,7 @@ export function renderTransfer() {
         </div>
     `;
 
-    // WebRTC Manager event bindings for transfers
+    // Event Listeners
     rtcManager.on('room_created', (roomId) => {
         updateState(s => ({ ...s, session: { ...s.session, roomId, isConnected: true, isHost: true } }));
         refreshUIState();
@@ -170,30 +167,20 @@ export function renderTransfer() {
 
     rtcManager.on('transfer_completed', (transfer) => {
         upsertTransferRecord(container, transfer);
-        completedTransfersList.push(transfer);
     });
 
     if (selectedFiles.length > 0) {
         renderQueueDOM(container);
     }
 
-    // UI Event Handlers
     container.querySelector('#btn-create-room').addEventListener('click', async () => {
-        try {
-            await rtcManager.createRoom();
-        } catch (err) {
-            showToast('Failed to create room', 'error');
-        }
+        try { await rtcManager.createRoom(); } catch (err) { showToast('Failed to create room', 'error'); }
     });
 
     container.querySelector('#btn-join-room-modal').addEventListener('click', async () => {
         const roomCode = prompt('Enter Room ID / Code:');
         if (roomCode) {
-            try {
-                await rtcManager.joinRoom(roomCode.toUpperCase().trim());
-            } catch (err) {
-                showToast('Failed to join room', 'error');
-            }
+            try { await rtcManager.joinRoom(roomCode.toUpperCase().trim()); } catch (err) { showToast('Failed to join room', 'error'); }
         }
     });
 
@@ -211,17 +198,11 @@ export function renderTransfer() {
 
     container.querySelector('#btn-copy-link').addEventListener('click', () => {
         const roomId = getState().session.roomId;
-        if (!roomId) {
-            showToast('No active room to share', 'error');
-            return;
-        }
+        if (!roomId) { showToast('No active room to share', 'error'); return; }
         const link = `${window.location.origin}${window.location.pathname}#transfer?room=${roomId}`;
-        navigator.clipboard.writeText(link).then(() => {
-            showToast('Invitation link copied', 'success');
-        });
+        navigator.clipboard.writeText(link).then(() => showToast('Invitation link copied', 'success'));
     });
 
-    // File Drag & Drop / Selection
     const dropzone = container.querySelector('#dropzone');
     const fileInput = container.querySelector('#file-input');
 
@@ -257,7 +238,7 @@ export function renderTransfer() {
 
     container.querySelector('#btn-send-files').addEventListener('click', async () => {
         if (selectedFiles.length === 0) return;
-        showToast('Encrypting & initiating file transfer...', 'info');
+        showToast('Encrypting & initiating transfer...', 'info');
         const filesToSend = [...selectedFiles];
         selectedFiles = [];
         renderQueueDOM(container);
@@ -353,7 +334,6 @@ function upsertTransferRecord(container, transfer) {
     const progressContainer = container.querySelector('#transfers-progress-container');
     if (!progressContainer) return;
 
-    // Remove placeholder if present
     if (progressContainer.querySelector('.text-center')) {
         progressContainer.innerHTML = '';
     }
@@ -362,7 +342,7 @@ function upsertTransferRecord(container, transfer) {
     if (!itemEl) {
         itemEl = document.createElement('div');
         itemEl.dataset.transferId = transfer.transferId;
-        itemEl.className = 'p-4 bg-navy-950/60 border border-navy-800 rounded-xl space-y-3';
+        itemEl.className = 'p-4 bg-navy-950/60 border border-navy-800 rounded-xl space-y-3 animate-fade-in';
         progressContainer.appendChild(itemEl);
     }
 
@@ -372,7 +352,7 @@ function upsertTransferRecord(container, transfer) {
     let actionButtonHtml = '';
     if (isCompleted && transfer.blob) {
         const url = URL.createObjectURL(transfer.blob);
-        actionButtonHtml = `<a href="${url}" download="${transfer.name}" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-all">Save File</a>`;
+        actionButtonHtml = `<a href="${url}" download="${transfer.name}" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-all shadow-md">Save File</a>`;
     } else {
         actionButtonHtml = `<button data-id="${transfer.transferId}" class="cancel-transfer-btn text-xs text-red-400 hover:text-red-300">Cancel</button>`;
     }

@@ -1,6 +1,6 @@
 import { SignalingClient } from './signaling.client.js';
 import { showToast } from '../utils/notifier.js';
-import { generateSessionKeys, importSessionKey, encryptChunk, decryptChunk } from '../crypto/encryption.js';
+import { generateSessionKeys, importSessionKey, encryptChunk, decryptChunk, calculateFileHash } from '../crypto/encryption.js';
 
 class WebRTCManager {
     constructor(config = {}) {
@@ -12,10 +12,11 @@ class WebRTCManager {
         this.iceCandidateQueue = [];
         this.connectionTimeout = null;
         
-        // Cryptographic state
+        // Cryptographic and Transfer State
         this.sessionKey = null;
-        this.activeTransfers = new Map(); // transferId -> transfer metadata & state
-        this.incomingTransfers = new Map(); // transferId -> metadata waiting approval
+        this.sessionKeyBase64 = null;
+        this.activeTransfers = new Map(); // transferId -> transfer record
+        this.incomingTransfers = new Map(); // transferId -> incoming record
 
         this.config = {
             iceServers: config.iceServers || [
@@ -132,12 +133,13 @@ class WebRTCManager {
 
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection.connectionState;
+            console.log('[WebRTC] Connection state diagnostic:', state);
             this._emit('connection_state_change', state);
             if (state === 'connected') {
                 this._clearConnectionTimeout();
                 showToast('P2P connection established successfully', 'success');
-            } else if (state === 'failed') {
-                showToast('Peer connection failed', 'error');
+            } else if (state === 'failed' || state === 'disconnected') {
+                console.warn('[WebRTC] Peer connection state:', state);
             }
         };
 
@@ -162,13 +164,13 @@ class WebRTCManager {
         this.dataChannel.onopen = () => {
             this._clearConnectionTimeout();
             this._emit('datachannel_open');
-            // If joiner, send crypto key exchange over data channel or sync
             if (!this.isHost && this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
         };
 
         this.dataChannel.onclose = () => {
+            console.log('[DataChannel] Closed');
             this._emit('datachannel_close');
         };
 
@@ -187,7 +189,7 @@ class WebRTCManager {
                 const msg = JSON.parse(data);
                 if (msg.type === 'KEY_EXCHANGE') {
                     this.sessionKey = await importSessionKey(msg.key);
-                    console.log('[Crypto] Session encryption key imported successfully');
+                    console.log('[Crypto] Session encryption key imported');
                 } else if (msg.type === 'FILE_META') {
                     this.incomingTransfers.set(msg.transferId, {
                         transferId: msg.transferId,
@@ -195,6 +197,7 @@ class WebRTCManager {
                         size: msg.size,
                         fileType: msg.fileType,
                         totalChunks: msg.chunks,
+                        expectedHash: msg.sha256,
                         receivedChunks: 0,
                         chunksArray: []
                     });
@@ -202,7 +205,7 @@ class WebRTCManager {
                 } else if (msg.type === 'FILE_ACCEPT') {
                     const transfer = this.activeTransfers.get(msg.transferId);
                     if (transfer) {
-                        transfer.status = 'sending';
+                        transfer.status = 'transferring';
                         this._emit('transfer_progress', transfer);
                         await this._streamFileChunks(transfer);
                     }
@@ -217,24 +220,31 @@ class WebRTCManager {
                     this.incomingTransfers.delete(msg.transferId);
                     this._emit('transfer_cancelled', msg.transferId);
                     showToast('Transfer cancelled by peer', 'info');
+                } else if (msg.type === 'TRANSFER_SUCCESS_ACK') {
+                    const transfer = this.activeTransfers.get(msg.transferId);
+                    if (transfer) {
+                        transfer.status = 'completed';
+                        this._emit('transfer_completed', transfer);
+                        showToast(`Successfully sent and verified ${transfer.name}`, 'success');
+                    }
                 }
             } catch (err) {
                 console.error('Failed to parse text message over DC:', err);
             }
         } else {
-            // Binary chunk received (ArrayBuffer). Format: [4 bytes transferId length] [JSON metadata string] [IV 12 bytes] [Encrypted Payload]
-            const view = new DataView(data);
-            const metaLen = view.getUint32(0);
-            const decoder = new TextDecoder();
-            const metaStr = decoder.decode(data.slice(4, 4 + metaLen));
-            const meta = JSON.parse(metaStr);
+            // Binary chunk received
+            try {
+                const view = new DataView(data);
+                const metaLen = view.getUint32(0);
+                const decoder = new TextDecoder();
+                const metaStr = decoder.decode(data.slice(4, 4 + metaLen));
+                const meta = JSON.parse(metaStr);
 
-            const iv = data.slice(4 + metaLen, 4 + metaLen + 12);
-            const ciphertext = data.slice(4 + metaLen + 12);
+                const iv = data.slice(4 + metaLen, 4 + metaLen + 12);
+                const ciphertext = data.slice(4 + metaLen + 12);
 
-            const transfer = this.incomingTransfers.get(meta.transferId);
-            if (transfer && this.sessionKey) {
-                try {
+                const transfer = this.incomingTransfers.get(meta.transferId);
+                if (transfer && this.sessionKey) {
                     const decrypted = await decryptChunk(this.sessionKey, iv, ciphertext);
                     transfer.chunksArray[meta.seq] = decrypted;
                     transfer.receivedChunks++;
@@ -249,22 +259,35 @@ class WebRTCManager {
 
                     if (transfer.receivedChunks === transfer.totalChunks) {
                         const completeBlob = new Blob(transfer.chunksArray, { type: transfer.fileType });
-                        transfer.blob = completeBlob;
-                        transfer.status = 'completed';
-                        this._emit('transfer_completed', transfer);
-                        showToast(`Successfully received ${transfer.name}`, 'success');
+                        const reconstructedBuffer = await completeBlob.arrayBuffer();
+                        const computedHash = await calculateFileHash(reconstructedBuffer);
+
+                        if (computedHash === transfer.expectedHash) {
+                            transfer.blob = completeBlob;
+                            transfer.status = 'completed';
+                            this._emit('transfer_completed', transfer);
+                            showToast(`Verified & received ${transfer.name}`, 'success');
+
+                            // Send acknowledgement back to sender
+                            if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                                this.dataChannel.send(JSON.stringify({ type: 'TRANSFER_SUCCESS_ACK', transferId: transfer.transferId }));
+                            }
+                        } else {
+                            transfer.status = 'failed';
+                            this._emit('transfer_progress', transfer);
+                            showToast(`Hash verification failed for ${transfer.name}`, 'error');
+                        }
                     }
-                } catch (err) {
-                    console.error('Decryption failed for incoming chunk:', err);
-                    showToast('Cryptographic integrity check failed for file chunk', 'error');
                 }
+            } catch (err) {
+                console.error('Failed to decrypt or process binary chunk:', err);
+                showToast('Chunk decryption failed', 'error');
             }
         }
     }
 
     async sendFiles(files) {
         if (!this.sessionKey) {
-            // If joiner didn't have key generated locally, generate one and send to host
             const keys = await generateSessionKeys();
             this.sessionKey = keys.key;
             this.sessionKeyBase64 = keys.rawBase64;
@@ -273,11 +296,12 @@ class WebRTCManager {
             }
         }
 
-        const CHUNK_SIZE = 16 * 1024; // 16KB safe SCTP chunk size
+        const CHUNK_SIZE = 16 * 1024; // 16KB safe chunk size
 
         for (const file of files) {
-            const transferId = Math.random().toString(36.25).substring(2, 11);
+            const transferId = Math.random().toString(36).substring(2, 11);
             const arrayBuf = await file.arrayBuffer();
+            const sha256 = await calculateFileHash(arrayBuf);
             const totalChunks = Math.ceil(arrayBuf.byteLength / CHUNK_SIZE);
 
             const transferRecord = {
@@ -289,14 +313,15 @@ class WebRTCManager {
                 arrayBuf,
                 CHUNK_SIZE,
                 totalChunks,
+                sha256,
                 sentChunks: 0,
-                status: 'pending_acceptance'
+                status: 'waiting_for_acceptance',
+                progress: 0
             };
 
             this.activeTransfers.set(transferId, transferRecord);
             this._emit('transfer_initiated', transferRecord);
 
-            // Send metadata to receiver
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 this.dataChannel.send(JSON.stringify({
                     type: 'FILE_META',
@@ -304,7 +329,8 @@ class WebRTCManager {
                     name: file.name,
                     size: file.size,
                     fileType: file.type,
-                    chunks: totalChunks
+                    chunks: totalChunks,
+                    sha256
                 }));
             }
         }
@@ -314,20 +340,18 @@ class WebRTCManager {
         const { arrayBuf, CHUNK_SIZE, totalChunks, transferId, file } = transfer;
 
         for (let seq = 0; seq < totalChunks; seq++) {
-            if (transfer.status === 'cancelled') break;
+            if (transfer.status === 'cancelled' || transfer.status === 'failed') break;
 
             const start = seq * CHUNK_SIZE;
             const end = Math.min(start + CHUNK_SIZE, arrayBuf.byteLength);
             const chunkSlice = arrayBuf.slice(start, end);
 
-            // Encrypt chunk locally using AES-GCM
             const { iv, ciphertext } = await encryptChunk(this.sessionKey, chunkSlice);
 
             const metaHeader = JSON.stringify({ transferId, seq });
             const metaEncoder = new TextEncoder();
             const metaBytes = metaEncoder.encode(metaHeader);
 
-            // Construct binary packet: [4 bytes metaLen] [metaBytes] [12 bytes IV] [ciphertext]
             const packet = new ArrayBuffer(4 + metaBytes.byteLength + 12 + ciphertext.byteLength);
             const view = new DataView(packet);
             view.setUint32(0, metaBytes.byteLength);
@@ -337,32 +361,37 @@ class WebRTCManager {
             uint8.set(new Uint8Array(iv), 4 + metaBytes.byteLength);
             uint8.set(new Uint8Array(ciphertext), 4 + metaBytes.byteLength + 12);
 
-            // Backpressure handling: wait if bufferedAmount is high
-            while (this.dataChannel.bufferedAmount > 64 * 1024) {
-                await new Promise(r => setTimeout(r, 50));
+            // Robust Backpressure Flow Control using bufferedAmount low threshold
+            if (this.dataChannel.bufferedAmount > 256 * 1024) {
+                await new Promise((resolve) => {
+                    const threshold = 64 * 1024;
+                    this.dataChannel.bufferedAmountLowThreshold = threshold;
+                    const handler = () => {
+                        this.dataChannel.removeEventListener('bufferedamountlow', handler);
+                        resolve();
+                    };
+                    this.dataChannel.addEventListener('bufferedamountlow', handler);
+                    // Fallback timeout in case event is missed
+                    setTimeout(resolve, 100);
+                });
             }
 
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 this.dataChannel.send(packet);
                 transfer.sentChunks++;
                 const progress = Math.round((transfer.sentChunks / totalChunks) * 100);
+                transfer.progress = progress;
                 this._emit('transfer_progress', {
                     transferId,
                     name: file.name,
                     progress,
-                    status: 'sending'
+                    status: 'transferring'
                 });
             } else {
                 transfer.status = 'failed';
                 this._emit('transfer_progress', transfer);
                 break;
             }
-        }
-
-        if (transfer.sentChunks === totalChunks && transfer.status !== 'cancelled') {
-            transfer.status = 'completed';
-            this._emit('transfer_completed', transfer);
-            showToast(`Successfully sent ${file.name}`, 'success');
         }
     }
 
@@ -381,9 +410,7 @@ class WebRTCManager {
 
     cancelTransfer(transferId) {
         const transfer = this.activeTransfers.get(transferId);
-        if (transfer) {
-            transfer.status = 'cancelled';
-        }
+        if (transfer) transfer.status = 'cancelled';
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
             this.dataChannel.send(JSON.stringify({ type: 'FILE_CANCEL', transferId }));
         }
@@ -394,7 +421,7 @@ class WebRTCManager {
         this._clearConnectionTimeout();
         this.connectionTimeout = setTimeout(() => {
             if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
-                showToast('Connection attempt timed out. Verify network firewalls.', 'error');
+                showToast('Connection attempt timed out', 'error');
                 this._emit('connection_state_change', 'failed');
             }
         }, 25000);
@@ -421,6 +448,7 @@ class WebRTCManager {
     async _handleOffer(offer) {
         if (!this.peerConnection) this._createPeerConnection();
         try {
+            if (this.peerConnection.signalingState !== 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
             await this._processQueuedIceCandidates();
             const answer = await this.peerConnection.createAnswer();
@@ -433,6 +461,7 @@ class WebRTCManager {
 
     async _handleAnswer(answer) {
         try {
+            if (this.peerConnection.signalingState === 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
             await this._processQueuedIceCandidates();
         } catch (err) {
