@@ -18,10 +18,16 @@ class WebRTCManager {
         this.activeTransfers = new Map();
         this.incomingTransfers = new Map();
 
+        // Configured with STUN and the provided TURN relay server credentials
         this.config = {
             iceServers: config.iceServers || [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' },
+                {
+                    urls: 'turn:free.expressturn.com:3478',
+                    username: '000000002109302648',
+                    credential: 'U8xYJk9FVhRqSdgnSeB6Zn95oRQ='
+                }
             ]
         };
         this.listeners = new Map();
@@ -74,7 +80,6 @@ class WebRTCManager {
             this.isHost = false;
             console.log('[WebRTC] Room joined as peer:', roomId);
             this._emit('room_joined', roomId);
-            // Explicitly initialize peer connection for the joining peer so ondatachannel is ready
             this._createPeerConnection();
         });
 
@@ -82,7 +87,6 @@ class WebRTCManager {
             console.log('[WebRTC] Peer joined notification received');
             this._emit('peer_joined');
             if (this.isHost) {
-                // Ensure peer connection exists before creating offer
                 if (!this.peerConnection) {
                     this._createPeerConnection();
                 }
@@ -133,7 +137,7 @@ class WebRTCManager {
             this.peerConnection.close();
         }
 
-        console.log('[WebRTC] Initializing RTCPeerConnection, isHost:', this.isHost);
+        console.log('[WebRTC] Initializing RTCPeerConnection with TURN support, isHost:', this.isHost);
         this.peerConnection = new RTCPeerConnection(this.config);
         this.iceCandidateQueue = [];
 
@@ -154,7 +158,6 @@ class WebRTCManager {
             }
         };
 
-        // Host creates data channel; Joiner listens for ondatachannel
         if (this.isHost) {
             try {
                 this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
