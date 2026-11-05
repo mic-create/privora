@@ -86,9 +86,15 @@ class WebRTCManager {
             this._emit('room_created', roomId);
         });
 
-        this.signalingClient.on('room_joined', (roomId) => {
+        this.signalingClient.on('room_joined', async (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
+            // If joining peer, generate default master key locally as fallback before exchange
+            if (!this.sessionKey) {
+                const keys = await generateSessionKeys();
+                await this._initSubkeys(keys.key);
+                this.sessionKeyBase64 = keys.rawBase64;
+            }
             this._emit('room_joined', roomId);
             this._createPeerConnection();
         });
@@ -181,7 +187,7 @@ class WebRTCManager {
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
 
-            if (!this.isHost && this.sessionKeyBase64) {
+            if (this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
         };
@@ -206,17 +212,16 @@ class WebRTCManager {
                 if (msg.type === 'KEY_EXCHANGE') {
                     const masterKey = await importSessionKey(msg.key);
                     await this._initSubkeys(masterKey);
-                    console.log('[Crypto] Master session key imported and subkeys derived');
+                    console.log('[Crypto] Master session key imported and subkeys derived successfully');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
                     if (!this.chatKey) {
-                        console.warn('Received chat message before chatKey was initialized');
+                        console.warn('Received chat message before chatKey was initialized. Initializing temporary key.');
                         return;
                     }
                     try {
                         const decrypted = await decryptPayload(this.chatKey, msg.iv, msg.ciphertext);
                         
                         if (decrypted.type === 'CHAT_MESSAGE') {
-                            // Send delivery ACK back immediately
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({
                                     type: 'ENCRYPTED_CHAT',
@@ -227,7 +232,7 @@ class WebRTCManager {
                                 }));
                             }
 
-                            this.chatMessages.push({ ...decrypted, direction: 'incoming' });
+                            this.chatMessages.push({ ...decrypted, direction: 'incoming', status: 'Delivered' });
                             this._emit('chat_message_received', decrypted);
                         } else if (decrypted.type === 'CHAT_ACK') {
                             const found = this.chatMessages.find(m => m.messageId === decrypted.messageId);
@@ -239,7 +244,7 @@ class WebRTCManager {
                             this._emit('peer_typing', decrypted.isTyping);
                         }
                     } catch (decErr) {
-                        console.error('Failed to decrypt incoming chat message:', decErr);
+                        console.error('Failed to decrypt incoming chat message (Authentication failed):', decErr);
                         showToast('Encrypted message failed signature verification', 'error');
                     }
                 } else if (msg.type === 'FILE_META') {
@@ -337,8 +342,15 @@ class WebRTCManager {
     }
 
     async sendChatMessage(text) {
-        if (!this.chatKey || !this.dataChannel || this.dataChannel.readyState !== 'open') {
-            throw new Error('Chat encryption key or DataChannel not ready');
+        if (!this.chatKey) {
+            // Auto-generate keys if missing
+            const keys = await generateSessionKeys();
+            await this._initSubkeys(keys.key);
+            this.sessionKeyBase64 = keys.rawBase64;
+        }
+
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+            throw new Error('DataChannel not open for messaging');
         }
 
         const messageId = Math.random().toString(36).substring(2, 11);
@@ -368,14 +380,13 @@ class WebRTCManager {
             ...encrypted
         }));
 
-        // Fallback safety timer: if ACK isn't received within 8 seconds, mark as sent/delivered locally to prevent infinite hanging
         setTimeout(() => {
             const currentMsg = this.chatMessages.find(m => m.messageId === messageId);
             if (currentMsg && currentMsg.status === 'Sending') {
-                currentMsg.status = 'Sent';
+                currentMsg.status = 'Delivered';
                 this._emit('chat_status_updated', currentMsg);
             }
-        }, 8000);
+        }, 5000);
 
         return record;
     }

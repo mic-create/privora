@@ -27,9 +27,6 @@ export async function importSessionKey(base64Key) {
     );
 }
 
-/**
- * Derive isolated directional subkeys using HKDF
- */
 export async function deriveSubkey(masterKey, saltString, infoString) {
     const encoder = new TextEncoder();
     const masterRaw = await window.crypto.subtle.exportKey('raw', masterKey);
@@ -57,6 +54,7 @@ export async function deriveSubkey(masterKey, saltString, infoString) {
 }
 
 export async function encryptPayload(key, plaintextObject) {
+    if (!key) throw new Error('Encryption failed: Missing CryptoKey');
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const encoder = new TextEncoder();
     const encoded = encoder.encode(JSON.stringify(plaintextObject));
@@ -74,6 +72,7 @@ export async function encryptPayload(key, plaintextObject) {
 }
 
 export async function decryptPayload(key, ivArray, ciphertextArray) {
+    if (!key) throw new Error('Decryption failed: Missing CryptoKey');
     const iv = new Uint8Array(ivArray);
     const ciphertext = new Uint8Array(ciphertextArray);
 
