@@ -89,7 +89,6 @@ class WebRTCManager {
         this.signalingClient.on('room_joined', async (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
-            // If joining peer, generate default master key locally as fallback before exchange
             if (!this.sessionKey) {
                 const keys = await generateSessionKeys();
                 await this._initSubkeys(keys.key);
@@ -215,12 +214,13 @@ class WebRTCManager {
                     console.log('[Crypto] Master session key imported and subkeys derived successfully');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
                     if (!this.chatKey) {
-                        console.warn('Received chat message before chatKey was initialized. Initializing temporary key.');
+                        console.warn('Received chat message before chatKey was initialized.');
                         return;
                     }
                     try {
                         const decrypted = await decryptPayload(this.chatKey, msg.iv, msg.ciphertext);
                         
+                        // Strictly route based on decrypted packet type
                         if (decrypted.type === 'CHAT_MESSAGE') {
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({
@@ -241,12 +241,18 @@ class WebRTCManager {
                                 this._emit('chat_status_updated', found);
                             }
                         } else if (decrypted.type === 'TYPING') {
+                            // Safely handle typing indicator without triggering chat errors
                             this._emit('peer_typing', decrypted.isTyping);
+                        } else {
+                            console.warn('Unknown decrypted packet subtype:', decrypted.type);
                         }
                     } catch (decErr) {
-                        console.error('Failed to decrypt incoming chat message (Authentication failed):', decErr);
+                        console.error('Failed to decrypt incoming chat payload:', decErr);
                         showToast('Encrypted message failed signature verification', 'error');
                     }
+                } else if (msg.type === 'TYPING_INDICATOR') {
+                    // Separate lightweight typing control frame handler
+                    this._emit('peer_typing', msg.isTyping);
                 } else if (msg.type === 'FILE_META') {
                     this.incomingTransfers.set(msg.transferId, {
                         transferId: msg.transferId,
@@ -343,7 +349,6 @@ class WebRTCManager {
 
     async sendChatMessage(text) {
         if (!this.chatKey) {
-            // Auto-generate keys if missing
             const keys = await generateSessionKeys();
             await this._initSubkeys(keys.key);
             this.sessionKeyBase64 = keys.rawBase64;
@@ -392,14 +397,11 @@ class WebRTCManager {
     }
 
     async sendTypingIndicator(isTyping) {
-        if (!this.chatKey || !this.dataChannel || this.dataChannel.readyState !== 'open') return;
-        const encrypted = await encryptPayload(this.chatKey, {
-            type: 'TYPING',
-            isTyping
-        });
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') return;
+        // Dispatch typing indicators as a distinct unencrypted or light control frame to avoid decryption mismatches
         this.dataChannel.send(JSON.stringify({
-            type: 'ENCRYPTED_CHAT',
-            ...encrypted
+            type: 'TYPING_INDICATOR',
+            isTyping
         }));
     }
 
