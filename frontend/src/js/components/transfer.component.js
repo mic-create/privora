@@ -4,12 +4,13 @@ import { rtcManager } from '../network/webrtc.manager.js';
 
 let selectedFiles = [];
 let pendingIncomingTransfers = [];
-let activeTransfersList = [];
 
 export function renderTransfer() {
     const state = getState();
     const container = document.createElement('div');
     container.className = 'space-y-6 animate-fade-in max-w-7xl mx-auto pb-12';
+
+    const isDataChannelOpen = rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
 
     container.innerHTML = `
         <!-- Session Controls Header -->
@@ -20,7 +21,7 @@ export function renderTransfer() {
                 </div>
                 <div>
                     <h3 class="text-base font-semibold text-white">Peer-to-Peer Encrypted File Transfer</h3>
-                    <p class="text-xs text-slate-400 font-mono mt-0.5" id="transfer-room-status">Status: ${state.session.isConnected ? 'Connected • Room Active' : 'Disconnected • Ready'}</p>
+                    <p class="text-xs text-slate-400 font-mono mt-0.5" id="transfer-room-status">Status: ${isDataChannelOpen ? 'DataChannel OPEN • Ready' : (state.session.isConnected ? 'Connected • Establishing DataChannel...' : 'Disconnected • Ready')}</p>
                 </div>
             </div>
             <div class="flex items-center gap-3 w-full md:w-auto flex-wrap">
@@ -70,7 +71,7 @@ export function renderTransfer() {
                             ${selectedFiles.length === 0 ? `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>` : ''}
                         </div>
                         <div class="mt-4">
-                            <button id="btn-send-files" ${selectedFiles.length === 0 || !state.session.isConnected ? 'disabled' : ''} class="w-full py-3 bg-accent-600 hover:bg-accent-500 disabled:bg-accent-600/30 disabled:text-white/40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                            <button id="btn-send-files" ${selectedFiles.length === 0 || !isDataChannelOpen ? 'disabled' : ''} class="w-full py-3 bg-accent-600 hover:bg-accent-500 disabled:bg-accent-600/30 disabled:text-white/40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
                                 Send Files (Encrypted P2P)
                             </button>
@@ -105,7 +106,7 @@ export function renderTransfer() {
                         </div>
                         <div class="flex justify-between py-2 border-b border-navy-800">
                             <span class="text-slate-400">DataChannel:</span>
-                            <span id="datachannel-state" class="text-slate-400">${rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open' ? 'Open (Active)' : 'Standby'}</span>
+                            <span id="datachannel-state" class="${isDataChannelOpen ? 'text-emerald-400 font-semibold' : 'text-slate-400'}">${isDataChannelOpen ? 'Open (Active)' : 'Standby'}</span>
                         </div>
                         <div class="flex justify-between py-2">
                             <span class="text-slate-400">Encryption:</span>
@@ -126,10 +127,10 @@ export function renderTransfer() {
                         <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                         </div>
-                        <h4 class="text-sm font-semibold text-white">SHA-256 Verified</h4>
+                        <h4 class="text-sm font-semibold text-white">Mobile P2P Synced</h4>
                     </div>
                     <p class="text-xs text-slate-400 leading-relaxed">
-                        Transfers include cryptographic hash verification. Shared WebRTC sessions remain open across multiple sequential file transfers.
+                        DataChannel is now explicitly required to reach the OPEN state before enabling file transmission buttons across mobile browsers.
                     </p>
                 </div>
             </div>
@@ -394,14 +395,15 @@ function refreshUIState() {
     const leaveBtn = document.getElementById('btn-leave-room');
     const sendBtn = document.getElementById('btn-send-files');
 
-    if (statusEl) statusEl.textContent = `Status: ${state.session.isConnected ? 'Connected • Room Active' : 'Disconnected • Ready'}`;
+    const isOpen = rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
+
+    if (statusEl) statusEl.textContent = `Status: ${isOpen ? 'DataChannel OPEN • Ready' : (state.session.isConnected ? 'Connected • Establishing DataChannel...' : 'Disconnected • Ready')}`;
     if (roomEl) roomEl.textContent = state.session.roomId || 'None';
     if (peerEl) {
         peerEl.textContent = state.session.isConnected ? 'Connected' : 'Not Connected';
         peerEl.className = state.session.isConnected ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold';
     }
     if (dcEl) {
-        const isOpen = rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
         dcEl.textContent = isOpen ? 'Open (Active)' : 'Standby';
         dcEl.className = isOpen ? 'text-emerald-400 font-semibold' : 'text-slate-400';
     }
@@ -410,6 +412,6 @@ function refreshUIState() {
         else leaveBtn.classList.add('hidden');
     }
     if (sendBtn) {
-        sendBtn.disabled = selectedFiles.length === 0 || !state.session.isConnected || !(rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open');
+        sendBtn.disabled = selectedFiles.length === 0 || !isOpen;
     }
 }

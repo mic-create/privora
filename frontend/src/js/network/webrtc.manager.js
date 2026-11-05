@@ -15,8 +15,8 @@ class WebRTCManager {
         // Cryptographic and Transfer State
         this.sessionKey = null;
         this.sessionKeyBase64 = null;
-        this.activeTransfers = new Map(); // transferId -> transfer record
-        this.incomingTransfers = new Map(); // transferId -> incoming record
+        this.activeTransfers = new Map();
+        this.incomingTransfers = new Map();
 
         this.config = {
             iceServers: config.iceServers || [
@@ -65,33 +65,45 @@ class WebRTCManager {
             const keys = await generateSessionKeys();
             this.sessionKey = keys.key;
             this.sessionKeyBase64 = keys.rawBase64;
+            console.log('[WebRTC] Room created as host:', roomId);
             this._emit('room_created', roomId);
         });
 
         this.signalingClient.on('room_joined', (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
+            console.log('[WebRTC] Room joined as peer:', roomId);
             this._emit('room_joined', roomId);
+            // Explicitly initialize peer connection for the joining peer so ondatachannel is ready
+            this._createPeerConnection();
         });
 
         this.signalingClient.on('peer_joined', async () => {
+            console.log('[WebRTC] Peer joined notification received');
             this._emit('peer_joined');
             if (this.isHost) {
+                // Ensure peer connection exists before creating offer
+                if (!this.peerConnection) {
+                    this._createPeerConnection();
+                }
                 await this._createOffer();
             }
         });
 
         this.signalingClient.on('peer_left', () => {
+            console.log('[WebRTC] Peer left notification received');
             this._emit('peer_left');
             showToast('Peer disconnected from room', 'info');
             this.closeConnection();
         });
 
         this.signalingClient.on('rtc_offer', async (offer) => {
+            console.log('[WebRTC] Received SDP offer');
             await this._handleOffer(offer);
         });
 
         this.signalingClient.on('rtc_answer', async (answer) => {
+            console.log('[WebRTC] Received SDP answer');
             await this._handleAnswer(answer);
         });
 
@@ -111,17 +123,17 @@ class WebRTCManager {
         this.isHost = false;
         this.roomId = roomId;
         this.signalingClient.joinRoom(roomId);
-        this._createPeerConnection();
     }
 
     _createPeerConnection() {
-        if (this.peerConnection && this.peerConnection.connectionState === 'connected') {
+        if (this.peerConnection && (this.peerConnection.connectionState === 'connected' || this.peerConnection.connectionState === 'connecting')) {
             return this.peerConnection;
         }
         if (this.peerConnection) {
             this.peerConnection.close();
         }
 
+        console.log('[WebRTC] Initializing RTCPeerConnection, isHost:', this.isHost);
         this.peerConnection = new RTCPeerConnection(this.config);
         this.iceCandidateQueue = [];
 
@@ -133,22 +145,28 @@ class WebRTCManager {
 
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection.connectionState;
-            console.log('[WebRTC] Connection state diagnostic:', state);
+            console.log('[WebRTC] Connection state:', state);
             this._emit('connection_state_change', state);
             if (state === 'connected') {
                 this._clearConnectionTimeout();
-                showToast('P2P connection established successfully', 'success');
             } else if (state === 'failed' || state === 'disconnected') {
-                console.warn('[WebRTC] Peer connection state:', state);
+                console.warn('[WebRTC] Peer connection state warning:', state);
             }
         };
 
+        // Host creates data channel; Joiner listens for ondatachannel
         if (this.isHost) {
-            this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
-            this._setupDataChannel();
+            try {
+                this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
+                this._setupDataChannel();
+                console.log('[DataChannel] Created by host');
+            } catch (err) {
+                console.error('[DataChannel] Failed to create data channel on host:', err);
+            }
         } else {
             this.peerConnection.ondatachannel = (event) => {
                 this.dataChannel = event.channel;
+                console.log('[DataChannel] Received by joiner via ondatachannel');
                 this._setupDataChannel();
             };
         }
@@ -162,15 +180,18 @@ class WebRTCManager {
         this.dataChannel.binaryType = 'arraybuffer';
 
         this.dataChannel.onopen = () => {
+            console.log('[DataChannel] STATE: OPEN');
             this._clearConnectionTimeout();
             this._emit('datachannel_open');
+            showToast('Secure P2P DataChannel established', 'success');
+
             if (!this.isHost && this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
         };
 
         this.dataChannel.onclose = () => {
-            console.log('[DataChannel] Closed');
+            console.log('[DataChannel] STATE: CLOSED');
             this._emit('datachannel_close');
         };
 
@@ -189,7 +210,7 @@ class WebRTCManager {
                 const msg = JSON.parse(data);
                 if (msg.type === 'KEY_EXCHANGE') {
                     this.sessionKey = await importSessionKey(msg.key);
-                    console.log('[Crypto] Session encryption key imported');
+                    console.log('[Crypto] Session encryption key imported successfully');
                 } else if (msg.type === 'FILE_META') {
                     this.incomingTransfers.set(msg.transferId, {
                         transferId: msg.transferId,
@@ -232,7 +253,6 @@ class WebRTCManager {
                 console.error('Failed to parse text message over DC:', err);
             }
         } else {
-            // Binary chunk received
             try {
                 const view = new DataView(data);
                 const metaLen = view.getUint32(0);
@@ -268,7 +288,6 @@ class WebRTCManager {
                             this._emit('transfer_completed', transfer);
                             showToast(`Verified & received ${transfer.name}`, 'success');
 
-                            // Send acknowledgement back to sender
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({ type: 'TRANSFER_SUCCESS_ACK', transferId: transfer.transferId }));
                             }
@@ -296,7 +315,7 @@ class WebRTCManager {
             }
         }
 
-        const CHUNK_SIZE = 16 * 1024; // 16KB safe chunk size
+        const CHUNK_SIZE = 16 * 1024;
 
         for (const file of files) {
             const transferId = Math.random().toString(36).substring(2, 11);
@@ -361,7 +380,6 @@ class WebRTCManager {
             uint8.set(new Uint8Array(iv), 4 + metaBytes.byteLength);
             uint8.set(new Uint8Array(ciphertext), 4 + metaBytes.byteLength + 12);
 
-            // Robust Backpressure Flow Control using bufferedAmount low threshold
             if (this.dataChannel.bufferedAmount > 256 * 1024) {
                 await new Promise((resolve) => {
                     const threshold = 64 * 1024;
@@ -371,7 +389,6 @@ class WebRTCManager {
                         resolve();
                     };
                     this.dataChannel.addEventListener('bufferedamountlow', handler);
-                    // Fallback timeout in case event is missed
                     setTimeout(resolve, 100);
                 });
             }
@@ -424,7 +441,7 @@ class WebRTCManager {
                 showToast('Connection attempt timed out', 'error');
                 this._emit('connection_state_change', 'failed');
             }
-        }, 25000);
+        }, 30000);
     }
 
     _clearConnectionTimeout() {
@@ -440,6 +457,7 @@ class WebRTCManager {
             const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
             this.signalingClient.sendOffer(this.peerConnection.localDescription, this.roomId);
+            console.log('[WebRTC] Offer created and sent');
         } catch (err) {
             console.error('[WebRTC] Error creating offer:', err);
         }
@@ -448,12 +466,16 @@ class WebRTCManager {
     async _handleOffer(offer) {
         if (!this.peerConnection) this._createPeerConnection();
         try {
-            if (this.peerConnection.signalingState !== 'stable') return;
+            if (this.peerConnection.signalingState !== 'stable') {
+                console.warn('[WebRTC] Skipping offer, signaling state is:', this.peerConnection.signalingState);
+                return;
+            }
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
             await this._processQueuedIceCandidates();
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
             this.signalingClient.sendAnswer(this.peerConnection.localDescription, this.roomId);
+            console.log('[WebRTC] Answer created and sent');
         } catch (err) {
             console.error('[WebRTC] Error handling offer:', err);
         }
@@ -464,6 +486,7 @@ class WebRTCManager {
             if (this.peerConnection.signalingState === 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
             await this._processQueuedIceCandidates();
+            console.log('[WebRTC] Answer processed successfully');
         } catch (err) {
             console.error('[WebRTC] Error handling answer:', err);
         }
