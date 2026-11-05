@@ -9,6 +9,7 @@ export class WebRTCManager {
         this.roomId = null;
         this.isHost = false;
         this.iceCandidateQueue = [];
+        this.connectionTimeout = null;
         this.config = {
             iceServers: config.iceServers || [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -51,16 +52,19 @@ export class WebRTCManager {
         this.signalingClient.on('room_created', (roomId) => {
             this.roomId = roomId;
             this.isHost = true;
+            console.log('[WebRTC] Room created:', roomId);
             this._emit('room_created', roomId);
         });
 
         this.signalingClient.on('room_joined', (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
+            console.log('[WebRTC] Room joined:', roomId);
             this._emit('room_joined', roomId);
         });
 
         this.signalingClient.on('peer_joined', async () => {
+            console.log('[WebRTC] Peer joined event received');
             this._emit('peer_joined');
             if (this.isHost) {
                 await this._createOffer();
@@ -68,16 +72,19 @@ export class WebRTCManager {
         });
 
         this.signalingClient.on('peer_left', () => {
+            console.log('[WebRTC] Peer left event received');
             this._emit('peer_left');
             showToast('Peer disconnected from room', 'info');
             this.closeConnection();
         });
 
         this.signalingClient.on('rtc_offer', async (offer) => {
+            console.log('[WebRTC] Received WebRTC offer');
             await this._handleOffer(offer);
         });
 
         this.signalingClient.on('rtc_answer', async (answer) => {
+            console.log('[WebRTC] Received WebRTC answer');
             await this._handleAnswer(answer);
         });
 
@@ -99,7 +106,6 @@ export class WebRTCManager {
         this.isHost = false;
         this.roomId = roomId;
         this.signalingClient.joinRoom(roomId);
-        // Once joined, create peer connection and wait for offer (or if joining, peer joined event handles negotiation from host)
         this._createPeerConnection();
     }
 
@@ -108,22 +114,24 @@ export class WebRTCManager {
             this.peerConnection.close();
         }
 
+        console.log('[WebRTC] Creating RTCPeerConnection, isHost:', this.isHost);
         this.peerConnection = new RTCPeerConnection(this.config);
         this.iceCandidateQueue = [];
 
         this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
+            if (event.candidate && this.roomId) {
+                console.log('[WebRTC] Dispatched local ICE candidate');
                 this.signalingClient.sendIceCandidate(event.candidate, this.roomId);
             }
         };
 
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection.connectionState;
-            console.log('[WebRTC] Connection state change:', state);
+            console.log('[WebRTC] Connection state diagnostic:', state);
             this._emit('connection_state_change', state);
 
             if (state === 'connected') {
-                showToast('P2P connection established successfully', 'success');
+                this._clearConnectionTimeout();
             } else if (state === 'failed' || state === 'disconnected') {
                 showToast('Peer connection interrupted or failed', 'error');
             }
@@ -143,6 +151,7 @@ export class WebRTCManager {
             };
         }
 
+        this._startConnectionTimeout();
         return this.peerConnection;
     }
 
@@ -150,9 +159,10 @@ export class WebRTCManager {
         if (!this.dataChannel) return;
 
         this.dataChannel.onopen = () => {
-            console.log('[DataChannel] Open and ready for encrypted streams');
+            console.log('[DataChannel] OPEN and fully operational');
+            this._clearConnectionTimeout();
             this._emit('datachannel_open');
-            showToast('DataChannel operational', 'success');
+            showToast('Secure P2P DataChannel established', 'success');
         };
 
         this.dataChannel.onclose = () => {
@@ -166,16 +176,38 @@ export class WebRTCManager {
         };
 
         this.dataChannel.onmessage = (event) => {
+            console.log('[DataChannel] Received diagnostic message:', event.data);
             this._emit('datachannel_message', event.data);
         };
     }
 
+    _startConnectionTimeout() {
+        this._clearConnectionTimeout();
+        this.connectionTimeout = setTimeout(() => {
+            if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
+                console.warn('[WebRTC] Connection attempt timed out');
+                showToast('Connection attempt timed out. Please check network/NAT traversal.', 'error');
+                this._emit('connection_state_change', 'failed');
+            }
+        }, 20000); // 20 seconds timeout
+    }
+
+    _clearConnectionTimeout() {
+        if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+        }
+    }
+
     async _createOffer() {
-        this._createPeerConnection();
+        if (!this.peerConnection) {
+            this._createPeerConnection();
+        }
         try {
             const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
             this.signalingClient.sendOffer(this.peerConnection.localDescription, this.roomId);
+            console.log('[WebRTC] Offer created and sent');
             this._emit('negotiation_started');
         } catch (err) {
             console.error('[WebRTC] Error creating offer:', err);
@@ -195,6 +227,7 @@ export class WebRTCManager {
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
             this.signalingClient.sendAnswer(this.peerConnection.localDescription, this.roomId);
+            console.log('[WebRTC] Answer created and sent');
         } catch (err) {
             console.error('[WebRTC] Error handling offer:', err);
             showToast('Failed to process incoming connection offer', 'error');
@@ -205,6 +238,7 @@ export class WebRTCManager {
         try {
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
             await this._processQueuedIceCandidates();
+            console.log('[WebRTC] Answer processed successfully');
         } catch (err) {
             console.error('[WebRTC] Error handling answer:', err);
             showToast('Failed to process connection answer', 'error');
@@ -216,10 +250,12 @@ export class WebRTCManager {
         if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
             try {
                 await this.peerConnection.addIceCandidate(candidate);
+                console.log('[WebRTC] Added ICE candidate successfully');
             } catch (err) {
                 console.error('[WebRTC] Error adding ICE candidate:', err);
             }
         } else {
+            console.log('[WebRTC] Queuing ICE candidate (remote description not ready)');
             this.iceCandidateQueue.push(candidate);
         }
     }
@@ -229,6 +265,7 @@ export class WebRTCManager {
             const candidate = this.iceCandidateQueue.shift();
             try {
                 await this.peerConnection.addIceCandidate(candidate);
+                console.log('[WebRTC] Added queued ICE candidate');
             } catch (err) {
                 console.error('[WebRTC] Error adding queued ICE candidate:', err);
             }
@@ -245,6 +282,7 @@ export class WebRTCManager {
     }
 
     closeConnection() {
+        this._clearConnectionTimeout();
         if (this.dataChannel) {
             this.dataChannel.close();
             this.dataChannel = null;

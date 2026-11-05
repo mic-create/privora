@@ -2,9 +2,8 @@ import { showToast } from '../utils/notifier.js';
 
 export class SignalingClient {
     constructor(serverUrl) {
-        // Replace 'privora-backend' with your actual Render service name or custom domain
+        // Automatically targets Render backend in production and localhost during dev
         const productionWsUrl = 'wss://privora-signaling-backend.onrender.com';
-        
         this.serverUrl = serverUrl || (window.location.hostname === 'localhost' ? 'ws://localhost:5000' : productionWsUrl);
         this.ws = null;
         this.listeners = new Map();
@@ -19,12 +18,14 @@ export class SignalingClient {
                 return;
             }
 
+            console.log('[Signaling] Connecting to WebSocket server:', this.serverUrl);
+
             try {
                 this.ws = new WebSocket(this.serverUrl);
 
                 this.ws.onopen = () => {
                     this.isConnected = true;
-                    console.log('[Signaling] Connected to WebSocket server:', this.serverUrl);
+                    console.log('[Signaling] Connected successfully to WebSocket server');
                     this._startHeartbeat();
                     resolve();
                 };
@@ -78,7 +79,7 @@ export class SignalingClient {
 
     _handleMessage(message) {
         const { type, ...payload } = message;
-        console.log('[Signaling] Received message type:', type);
+        console.log('[Signaling] Received message type:', type, payload);
 
         switch (type) {
             case 'ROOM_CREATED':
@@ -116,7 +117,6 @@ export class SignalingClient {
     send(type, payload = {}) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.error('[Signaling] Cannot send message, WebSocket is not open');
-            showToast('Signaling connection lost. Reconnecting...', 'error');
             return false;
         }
 

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { WebSocket } from 'ws';
 import { logger } from '../utils/logger.js';
 import { validateSignalingMessage } from '../utils/validator.js';
 import { checkRateLimit } from '../middleware/rateLimit.middleware.js';
@@ -11,6 +12,8 @@ export function handleSignalingConnection(ws, req) {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     clientIps.set(ws, ip);
     ws.isAlive = true;
+
+    logger.info('WebSocket peer connected', { ip });
 
     ws.on('pong', () => {
         ws.isAlive = true;
@@ -34,6 +37,7 @@ export function handleSignalingConnection(ws, req) {
     });
 
     ws.on('close', () => {
+        logger.info('WebSocket peer disconnected', { ip });
         handleDisconnect(ws);
     });
 
@@ -68,42 +72,42 @@ function routeMessage(ws, message) {
 }
 
 function handleCreateRoom(ws) {
-    // Leave existing room if any
     handleDisconnect(ws);
 
     const roomId = crypto.randomBytes(4).toString('hex').toUpperCase();
     rooms.set(roomId, new Set([ws]));
     clientRooms.set(ws, roomId);
 
-    logger.info('Room created', { roomId });
+    logger.info('Room created successfully', { roomId });
     ws.send(JSON.stringify({ type: 'ROOM_CREATED', roomId }));
 }
 
 function handleJoinRoom(ws, roomId) {
-    if (!roomId || !rooms.has(roomId)) {
+    const upperRoomId = roomId ? roomId.toUpperCase() : '';
+    if (!upperRoomId || !rooms.has(upperRoomId)) {
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room does not exist or has expired' }));
         return;
     }
 
-    const room = rooms.get(roomId);
+    const room = rooms.get(upperRoomId);
     if (room.size >= 2) {
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
         return;
     }
 
-    // Leave current room if in one
     handleDisconnect(ws);
 
     room.add(ws);
-    clientRooms.set(ws, roomId);
+    clientRooms.set(ws, upperRoomId);
 
-    logger.info('Peer joined room', { roomId, roomSize: room.size });
-    ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId }));
+    logger.info('Peer joined room', { roomId: upperRoomId, roomSize: room.size });
+    ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId: upperRoomId }));
 
-    // Notify existing peer in room
+    // Notify existing peer in room using correct WebSocket.OPEN constant
     for (const peer of room) {
-        if (peer !== ws && peer.readyState === WebSocketOpen()) {
+        if (peer !== ws && peer.readyState === WebSocket.OPEN) {
             peer.send(JSON.stringify({ type: 'PEER_JOINED' }));
+            logger.info('Dispatched PEER_JOINED to host', { roomId: upperRoomId });
         }
     }
 }
@@ -117,7 +121,7 @@ function relayToPeer(ws, message) {
 
     const room = rooms.get(roomId);
     for (const peer of room) {
-        if (peer !== ws && peer.readyState === 1) { // WebSocket.OPEN is 1
+        if (peer !== ws && peer.readyState === WebSocket.OPEN) {
             peer.send(JSON.stringify(message));
         }
     }
@@ -132,7 +136,7 @@ function handleDisconnect(ws) {
         logger.info('Peer left room', { roomId, remainingPeers: room.size });
 
         for (const peer of room) {
-            if (peer.readyState === 1) {
+            if (peer.readyState === WebSocket.OPEN) {
                 peer.send(JSON.stringify({ type: 'PEER_LEFT' }));
             }
         }
