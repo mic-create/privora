@@ -1,0 +1,12 @@
+{
+  "name": "privora",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Privora workspace",
+  "workspaces": ["backend"],
+  "scripts": {
+    "dev": "npm --workspace backend run dev",
+    "start": "npm --workspace backend start",
+    "test": "npm --workspace backend test"
+  }
+}
