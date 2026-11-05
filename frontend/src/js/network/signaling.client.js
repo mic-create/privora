@@ -2,7 +2,10 @@ import { showToast } from '../utils/notifier.js';
 
 export class SignalingClient {
     constructor(serverUrl) {
-        this.serverUrl = serverUrl || (window.location.hostname === 'localhost' ? 'ws://localhost:5000' : `wss://${window.location.host}`);
+        // Replace 'privora-backend' with your actual Render service name or custom domain
+        const productionWsUrl = 'wss://privora-backend.onrender.com';
+        
+        this.serverUrl = serverUrl || (window.location.hostname === 'localhost' ? 'ws://localhost:5000' : productionWsUrl);
         this.ws = null;
         this.listeners = new Map();
         this.isConnected = false;
@@ -21,7 +24,7 @@ export class SignalingClient {
 
                 this.ws.onopen = () => {
                     this.isConnected = true;
-                    console.log('[Signaling] Connected to WebSocket server');
+                    console.log('[Signaling] Connected to WebSocket server:', this.serverUrl);
                     this._startHeartbeat();
                     resolve();
                 };
