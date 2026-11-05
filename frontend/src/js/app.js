@@ -5,7 +5,7 @@ import { initThemeToggle } from './utils/dom.js';
 import { showToast } from './utils/notifier.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('[PRIVORA] Initializing Frontend Foundation v1.0.0');
+    console.log('[PRIVORA] Initializing Frontend WebRTC Engine v1.0.0');
 
     // Initialize state
     initState();
@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Bind Global Header Action Buttons
     document.getElementById('btn-quick-start').addEventListener('click', () => {
         window.location.hash = '#transfer';
-        showToast('Secure session workspace ready. Create or join a room.', 'info');
+        showToast('Secure session workspace ready. Create a room.', 'info');
     });
 
     document.getElementById('btn-quick-join').addEventListener('click', () => {
