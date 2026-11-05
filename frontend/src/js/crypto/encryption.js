@@ -1,6 +1,6 @@
 /**
  * PRIVORA Cryptographic Utility Module
- * Web Crypto API wrapper for AES-GCM 256-bit encryption, HKDF key derivation, and SHA-256 hashing.
+ * Web Crypto API wrapper for AES-GCM 256-bit authenticated encryption, HKDF key derivation, and SHA-256 hashing.
  */
 
 export async function generateSessionKeys() {
@@ -72,18 +72,22 @@ export async function encryptPayload(key, plaintextObject) {
 }
 
 export async function decryptPayload(key, ivArray, ciphertextArray) {
-    if (!key) throw new Error('Decryption failed: Missing CryptoKey');
-    const iv = new Uint8Array(ivArray);
-    const ciphertext = new Uint8Array(ciphertextArray);
+    if (!key) throw new Error('DECRYPTION_FAILED: Missing CryptoKey');
+    try {
+        const iv = new Uint8Array(ivArray);
+        const ciphertext = new Uint8Array(ciphertextArray);
 
-    const decrypted = await window.crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        ciphertext
-    );
+        const decrypted = await window.crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            key,
+            ciphertext
+        );
 
-    const decoder = new TextDecoder();
-    return JSON.parse(decoder.decode(decrypted));
+        const decoder = new TextDecoder();
+        return JSON.parse(decoder.decode(decrypted));
+    } catch (err) {
+        throw new Error('AUTHENTICATION_TAG_FAILED: AES-GCM authentication check failed');
+    }
 }
 
 export async function encryptChunk(key, plaintextBuffer) {

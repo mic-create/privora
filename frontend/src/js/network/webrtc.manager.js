@@ -215,12 +215,12 @@ class WebRTCManager {
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
                     if (!this.chatKey) {
                         console.warn('Received chat message before chatKey was initialized.');
+                        showToast('Session key not yet synchronized', 'error');
                         return;
                     }
                     try {
                         const decrypted = await decryptPayload(this.chatKey, msg.iv, msg.ciphertext);
                         
-                        // Strictly route based on decrypted packet type
                         if (decrypted.type === 'CHAT_MESSAGE') {
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({
@@ -240,18 +240,14 @@ class WebRTCManager {
                                 found.status = 'Delivered';
                                 this._emit('chat_status_updated', found);
                             }
-                        } else if (decrypted.type === 'TYPING') {
-                            // Safely handle typing indicator without triggering chat errors
-                            this._emit('peer_typing', decrypted.isTyping);
                         } else {
                             console.warn('Unknown decrypted packet subtype:', decrypted.type);
                         }
                     } catch (decErr) {
-                        console.error('Failed to decrypt incoming chat payload:', decErr);
-                        showToast('Encrypted message failed signature verification', 'error');
+                        console.error('AES-GCM Authentication failed:', decErr);
+                        showToast('Encrypted message failed authentication tag verification', 'error');
                     }
                 } else if (msg.type === 'TYPING_INDICATOR') {
-                    // Separate lightweight typing control frame handler
                     this._emit('peer_typing', msg.isTyping);
                 } else if (msg.type === 'FILE_META') {
                     this.incomingTransfers.set(msg.transferId, {
@@ -398,7 +394,6 @@ class WebRTCManager {
 
     async sendTypingIndicator(isTyping) {
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') return;
-        // Dispatch typing indicators as a distinct unencrypted or light control frame to avoid decryption mismatches
         this.dataChannel.send(JSON.stringify({
             type: 'TYPING_INDICATOR',
             isTyping
