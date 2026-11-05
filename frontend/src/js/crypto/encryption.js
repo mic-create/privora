@@ -1,6 +1,6 @@
 /**
  * PRIVORA Cryptographic Utility Module
- * Web Crypto API wrapper for AES-GCM 256-bit authenticated encryption & SHA-256 integrity hashing.
+ * Web Crypto API wrapper for AES-GCM 256-bit encryption, HKDF key derivation, and SHA-256 hashing.
  */
 
 export async function generateSessionKeys() {
@@ -27,8 +27,67 @@ export async function importSessionKey(base64Key) {
     );
 }
 
+/**
+ * Derive isolated directional subkeys using HKDF
+ */
+export async function deriveSubkey(masterKey, saltString, infoString) {
+    const encoder = new TextEncoder();
+    const masterRaw = await window.crypto.subtle.exportKey('raw', masterKey);
+    
+    const importedMaster = await window.crypto.subtle.importKey(
+        'raw',
+        masterRaw,
+        { name: 'HKDF' },
+        false,
+        ['deriveKey']
+    );
+
+    return await window.crypto.subtle.deriveKey(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: encoder.encode(saltString),
+            info: encoder.encode(infoString)
+        },
+        importedMaster,
+        { name: 'AES-GCM', length: 256 },
+        true,
+        ['encrypt', 'decrypt']
+    );
+}
+
+export async function encryptPayload(key, plaintextObject) {
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encoder = new TextEncoder();
+    const encoded = encoder.encode(JSON.stringify(plaintextObject));
+
+    const ciphertext = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        encoded
+    );
+
+    return {
+        iv: Array.from(iv),
+        ciphertext: Array.from(new Uint8Array(ciphertext))
+    };
+}
+
+export async function decryptPayload(key, ivArray, ciphertextArray) {
+    const iv = new Uint8Array(ivArray);
+    const ciphertext = new Uint8Array(ciphertextArray);
+
+    const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        ciphertext
+    );
+
+    const decoder = new TextDecoder();
+    return JSON.parse(decoder.decode(decrypted));
+}
+
 export async function encryptChunk(key, plaintextBuffer) {
-    // Unique 96-bit (12-byte) IV per chunk to prevent nonce reuse
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const ciphertext = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },

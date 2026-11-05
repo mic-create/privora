@@ -1,6 +1,6 @@
 import { SignalingClient } from './signaling.client.js';
 import { showToast } from '../utils/notifier.js';
-import { generateSessionKeys, importSessionKey, encryptChunk, decryptChunk, calculateFileHash } from '../crypto/encryption.js';
+import { generateSessionKeys, importSessionKey, deriveSubkey, encryptPayload, decryptPayload, encryptChunk, decryptChunk, calculateFileHash } from '../crypto/encryption.js';
 
 class WebRTCManager {
     constructor(config = {}) {
@@ -12,13 +12,18 @@ class WebRTCManager {
         this.iceCandidateQueue = [];
         this.connectionTimeout = null;
         
-        // Cryptographic and Transfer State
+        // Cryptographic and Subkeys
         this.sessionKey = null;
         this.sessionKeyBase64 = null;
+        this.chatKey = null;
+        this.fileKey = null;
+
+        // Transfer & Chat State
         this.activeTransfers = new Map();
         this.incomingTransfers = new Map();
+        this.chatMessages = [];
+        this.lastSeenSequence = 0;
 
-        // Configured with STUN and the provided TURN relay server credentials
         this.config = {
             iceServers: config.iceServers || [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -64,50 +69,49 @@ class WebRTCManager {
         }
     }
 
+    async _initSubkeys(masterKey) {
+        this.sessionKey = masterKey;
+        this.chatKey = await deriveSubkey(masterKey, 'privora-salt-v1', 'privora-chat-encryption');
+        this.fileKey = await deriveSubkey(masterKey, 'privora-salt-v1', 'privora-file-encryption');
+        console.log('[Crypto] HKDF subkeys successfully derived for chat and files');
+    }
+
     _setupSignalingListeners() {
         this.signalingClient.on('room_created', async (roomId) => {
             this.roomId = roomId;
             this.isHost = true;
             const keys = await generateSessionKeys();
-            this.sessionKey = keys.key;
+            await this._initSubkeys(keys.key);
             this.sessionKeyBase64 = keys.rawBase64;
-            console.log('[WebRTC] Room created as host:', roomId);
             this._emit('room_created', roomId);
         });
 
         this.signalingClient.on('room_joined', (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
-            console.log('[WebRTC] Room joined as peer:', roomId);
             this._emit('room_joined', roomId);
             this._createPeerConnection();
         });
 
         this.signalingClient.on('peer_joined', async () => {
-            console.log('[WebRTC] Peer joined notification received');
             this._emit('peer_joined');
             if (this.isHost) {
-                if (!this.peerConnection) {
-                    this._createPeerConnection();
-                }
+                if (!this.peerConnection) this._createPeerConnection();
                 await this._createOffer();
             }
         });
 
         this.signalingClient.on('peer_left', () => {
-            console.log('[WebRTC] Peer left notification received');
             this._emit('peer_left');
             showToast('Peer disconnected from room', 'info');
             this.closeConnection();
         });
 
         this.signalingClient.on('rtc_offer', async (offer) => {
-            console.log('[WebRTC] Received SDP offer');
             await this._handleOffer(offer);
         });
 
         this.signalingClient.on('rtc_answer', async (answer) => {
-            console.log('[WebRTC] Received SDP answer');
             await this._handleAnswer(answer);
         });
 
@@ -133,11 +137,8 @@ class WebRTCManager {
         if (this.peerConnection && (this.peerConnection.connectionState === 'connected' || this.peerConnection.connectionState === 'connecting')) {
             return this.peerConnection;
         }
-        if (this.peerConnection) {
-            this.peerConnection.close();
-        }
+        if (this.peerConnection) this.peerConnection.close();
 
-        console.log('[WebRTC] Initializing RTCPeerConnection with TURN support, isHost:', this.isHost);
         this.peerConnection = new RTCPeerConnection(this.config);
         this.iceCandidateQueue = [];
 
@@ -149,27 +150,20 @@ class WebRTCManager {
 
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection.connectionState;
-            console.log('[WebRTC] Connection state:', state);
             this._emit('connection_state_change', state);
-            if (state === 'connected') {
-                this._clearConnectionTimeout();
-            } else if (state === 'failed' || state === 'disconnected') {
-                console.warn('[WebRTC] Peer connection state warning:', state);
-            }
+            if (state === 'connected') this._clearConnectionTimeout();
         };
 
         if (this.isHost) {
             try {
                 this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
                 this._setupDataChannel();
-                console.log('[DataChannel] Created by host');
             } catch (err) {
-                console.error('[DataChannel] Failed to create data channel on host:', err);
+                console.error('Failed to create data channel:', err);
             }
         } else {
             this.peerConnection.ondatachannel = (event) => {
                 this.dataChannel = event.channel;
-                console.log('[DataChannel] Received by joiner via ondatachannel');
                 this._setupDataChannel();
             };
         }
@@ -183,7 +177,6 @@ class WebRTCManager {
         this.dataChannel.binaryType = 'arraybuffer';
 
         this.dataChannel.onopen = () => {
-            console.log('[DataChannel] STATE: OPEN');
             this._clearConnectionTimeout();
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
@@ -194,7 +187,6 @@ class WebRTCManager {
         };
 
         this.dataChannel.onclose = () => {
-            console.log('[DataChannel] STATE: CLOSED');
             this._emit('datachannel_close');
         };
 
@@ -212,8 +204,47 @@ class WebRTCManager {
             try {
                 const msg = JSON.parse(data);
                 if (msg.type === 'KEY_EXCHANGE') {
-                    this.sessionKey = await importSessionKey(msg.key);
-                    console.log('[Crypto] Session encryption key imported successfully');
+                    const masterKey = await importSessionKey(msg.key);
+                    await this._initSubkeys(masterKey);
+                    console.log('[Crypto] Master session key imported and subkeys derived');
+                } else if (msg.type === 'ENCRYPTED_CHAT') {
+                    if (!this.chatKey) {
+                        console.warn('Received chat message before chatKey was initialized');
+                        return;
+                    }
+                    try {
+                        const decrypted = await decryptPayload(this.chatKey, msg.iv, msg.ciphertext);
+                        if (decrypted.sequence <= this.lastSeenSequence && decrypted.type === 'CHAT_MESSAGE') {
+                            console.warn('Replay attack detected or duplicate sequence');
+                            return;
+                        }
+                        this.lastSeenSequence = Math.max(this.lastSeenSequence, decrypted.sequence || 0);
+
+                        if (decrypted.type === 'CHAT_MESSAGE') {
+                            // Send delivery ACK back
+                            this.dataChannel.send(JSON.stringify({
+                                type: 'ENCRYPTED_CHAT',
+                                ...(await encryptPayload(this.chatKey, {
+                                    type: 'CHAT_ACK',
+                                    messageId: decrypted.messageId
+                                }))
+                            }));
+
+                            this.chatMessages.push({ ...decrypted, direction: 'incoming' });
+                            this._emit('chat_message_received', decrypted);
+                        } else if (decrypted.type === 'CHAT_ACK') {
+                            const found = this.chatMessages.find(m => m.messageId === decrypted.messageId);
+                            if (found) {
+                                found.status = 'Delivered';
+                                this._emit('chat_status_updated', found);
+                            }
+                        } else if (decrypted.type === 'TYPING') {
+                            this._emit('peer_typing', decrypted.isTyping);
+                        }
+                    } catch (decErr) {
+                        console.error('Failed to decrypt incoming chat message (Authentication failed):', decErr);
+                        showToast('Encrypted message failed signature/authentication verification', 'error');
+                    }
                 } else if (msg.type === 'FILE_META') {
                     this.incomingTransfers.set(msg.transferId, {
                         transferId: msg.transferId,
@@ -256,6 +287,7 @@ class WebRTCManager {
                 console.error('Failed to parse text message over DC:', err);
             }
         } else {
+            // Binary chunk for file transfer
             try {
                 const view = new DataView(data);
                 const metaLen = view.getUint32(0);
@@ -267,8 +299,8 @@ class WebRTCManager {
                 const ciphertext = data.slice(4 + metaLen + 12);
 
                 const transfer = this.incomingTransfers.get(meta.transferId);
-                if (transfer && this.sessionKey) {
-                    const decrypted = await decryptChunk(this.sessionKey, iv, ciphertext);
+                if (transfer && this.fileKey) {
+                    const decrypted = await decryptChunk(this.fileKey, iv, ciphertext);
                     transfer.chunksArray[meta.seq] = decrypted;
                     transfer.receivedChunks++;
 
@@ -302,16 +334,63 @@ class WebRTCManager {
                     }
                 }
             } catch (err) {
-                console.error('Failed to decrypt or process binary chunk:', err);
-                showToast('Chunk decryption failed', 'error');
+                console.error('Failed to decrypt file chunk:', err);
+                showToast('File chunk decryption failed', 'error');
             }
         }
     }
 
+    async sendChatMessage(text) {
+        if (!this.chatKey || !this.dataChannel || this.dataChannel.readyState !== 'open') {
+            throw new Error('Chat encryption key or DataChannel not ready');
+        }
+
+        const messageId = Math.random().toString(36).substring(2, 11);
+        const sequence = ++this.lastSeenSequence;
+        const timestamp = Date.now();
+
+        const chatPayload = {
+            type: 'CHAT_MESSAGE',
+            messageId,
+            sequence,
+            timestamp,
+            text
+        };
+
+        const encrypted = await encryptPayload(this.chatKey, chatPayload);
+        const record = {
+            ...chatPayload,
+            status: 'Sending',
+            direction: 'outgoing'
+        };
+
+        this.chatMessages.push(record);
+        this._emit('chat_message_sent', record);
+
+        this.dataChannel.send(JSON.stringify({
+            type: 'ENCRYPTED_CHAT',
+            ...encrypted
+        }));
+
+        return record;
+    }
+
+    async sendTypingIndicator(isTyping) {
+        if (!this.chatKey || !this.dataChannel || this.dataChannel.readyState !== 'open') return;
+        const encrypted = await encryptPayload(this.chatKey, {
+            type: 'TYPING',
+            isTyping
+        });
+        this.dataChannel.send(JSON.stringify({
+            type: 'ENCRYPTED_CHAT',
+            ...encrypted
+        }));
+    }
+
     async sendFiles(files) {
-        if (!this.sessionKey) {
+        if (!this.fileKey) {
             const keys = await generateSessionKeys();
-            this.sessionKey = keys.key;
+            await this._initSubkeys(keys.key);
             this.sessionKeyBase64 = keys.rawBase64;
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
@@ -368,7 +447,7 @@ class WebRTCManager {
             const end = Math.min(start + CHUNK_SIZE, arrayBuf.byteLength);
             const chunkSlice = arrayBuf.slice(start, end);
 
-            const { iv, ciphertext } = await encryptChunk(this.sessionKey, chunkSlice);
+            const { iv, ciphertext } = await encryptChunk(this.fileKey, chunkSlice);
 
             const metaHeader = JSON.stringify({ transferId, seq });
             const metaEncoder = new TextEncoder();
@@ -437,6 +516,11 @@ class WebRTCManager {
         this.activeTransfers.delete(transferId);
     }
 
+    clearConversation() {
+        this.chatMessages = [];
+        this.lastSeenSequence = 0;
+    }
+
     _startConnectionTimeout() {
         this._clearConnectionTimeout();
         this.connectionTimeout = setTimeout(() => {
@@ -460,27 +544,22 @@ class WebRTCManager {
             const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
             this.signalingClient.sendOffer(this.peerConnection.localDescription, this.roomId);
-            console.log('[WebRTC] Offer created and sent');
         } catch (err) {
-            console.error('[WebRTC] Error creating offer:', err);
+            console.error('Error creating offer:', err);
         }
     }
 
     async _handleOffer(offer) {
         if (!this.peerConnection) this._createPeerConnection();
         try {
-            if (this.peerConnection.signalingState !== 'stable') {
-                console.warn('[WebRTC] Skipping offer, signaling state is:', this.peerConnection.signalingState);
-                return;
-            }
+            if (this.peerConnection.signalingState !== 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
             await this._processQueuedIceCandidates();
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
             this.signalingClient.sendAnswer(this.peerConnection.localDescription, this.roomId);
-            console.log('[WebRTC] Answer created and sent');
         } catch (err) {
-            console.error('[WebRTC] Error handling offer:', err);
+            console.error('Error handling offer:', err);
         }
     }
 
@@ -489,9 +568,8 @@ class WebRTCManager {
             if (this.peerConnection.signalingState === 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
             await this._processQueuedIceCandidates();
-            console.log('[WebRTC] Answer processed successfully');
         } catch (err) {
-            console.error('[WebRTC] Error handling answer:', err);
+            console.error('Error handling answer:', err);
         }
     }
 
@@ -501,7 +579,7 @@ class WebRTCManager {
             try {
                 await this.peerConnection.addIceCandidate(candidate);
             } catch (err) {
-                console.error('[WebRTC] Error adding ICE candidate:', err);
+                console.error('Error adding ICE candidate:', err);
             }
         } else {
             this.iceCandidateQueue.push(candidate);
@@ -514,7 +592,7 @@ class WebRTCManager {
             try {
                 await this.peerConnection.addIceCandidate(candidate);
             } catch (err) {
-                console.error('[WebRTC] Error adding queued ICE candidate:', err);
+                console.error('Error adding queued ICE candidate:', err);
             }
         }
     }
