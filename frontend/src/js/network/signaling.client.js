@@ -3,7 +3,7 @@ import { showToast } from '../utils/notifier.js';
 export class SignalingClient {
     constructor(serverUrl) {
         // Replace 'privora-backend' with your actual Render service name or custom domain
-        const productionWsUrl = 'wss://privora-backend.onrender.com';
+        const productionWsUrl = 'wss://privora-signaling-backend.onrender.com';
         
         this.serverUrl = serverUrl || (window.location.hostname === 'localhost' ? 'ws://localhost:5000' : productionWsUrl);
         this.ws = null;
