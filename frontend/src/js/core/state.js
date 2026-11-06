@@ -21,6 +21,8 @@ let appState = {
     }
 };
 
+let listeners = [];
+
 export function initState() {
     const savedTheme = localStorage.getItem('privora_theme') || 'dark';
     appState.theme = savedTheme;
@@ -42,6 +44,26 @@ export function updateState(updater) {
         appState = updater(appState);
     } else {
         appState = { ...appState, ...updater };
+    }
+    notifyListeners();
+}
+
+// Alias to prevent import/export mismatches across app files
+export function setState(updater) {
+    updateState(updater);
+}
+
+export function subscribe(listener) {
+    listeners.push(listener);
+    listener(appState);
+    return () => {
+        listeners = listeners.filter(l => l !== listener);
+    };
+}
+
+function notifyListeners() {
+    for (const listener of listeners) {
+        listener(appState);
     }
     window.dispatchEvent(new CustomEvent('privora:statechange', { detail: appState }));
 }
