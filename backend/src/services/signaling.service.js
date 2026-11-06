@@ -4,10 +4,9 @@ import { logger } from '../utils/logger.js';
 import { validateSignalingMessage } from '../utils/validator.js';
 import { checkRateLimit } from '../middleware/rateLimit.middleware.js';
 
-const rooms = new Map(); // roomId -> Set of WebSocket clients
+const rooms = new Map(); // roomId -> { peers: Set, hostSocket: ws, cleanupTimer: null }
 const clientRooms = new Map(); // WebSocket client -> roomId
 const clientIps = new Map(); // WebSocket client -> IP string
-const roomCleanupTimers = new Map(); // roomId -> setTimeout handle for grace period
 
 export function handleSignalingConnection(ws, req) {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -54,7 +53,7 @@ function routeMessage(ws, message) {
             handleCreateRoom(ws);
             break;
         case 'JOIN_ROOM':
-            handleJoinRoom(ws, message.roomId);
+            handleJoinRoom(ws, message.roomId, message.isHostReconnection);
             break;
         case 'RTC_OFFER':
         case 'RTC_ANSWER':
@@ -77,60 +76,54 @@ function handleCreateRoom(ws) {
 
     const roomId = crypto.randomBytes(4).toString('hex').toUpperCase();
     
-    if (roomCleanupTimers.has(roomId)) {
-        clearTimeout(roomCleanupTimers.get(roomId));
-        roomCleanupTimers.delete(roomId);
-    }
-
-    rooms.set(roomId, new Set([ws]));
+    rooms.set(roomId, {
+        peers: new Set([ws]),
+        hostSocket: ws,
+        cleanupTimer: null
+    });
     clientRooms.set(ws, roomId);
-    ws.isRoomHost = true;
+    ws.isHost = true;
 
-    logger.info('Room created successfully', { roomId });
+    logger.info('Room created successfully by host', { roomId });
     ws.send(JSON.stringify({ type: 'ROOM_CREATED', roomId }));
 }
 
-function handleJoinRoom(ws, roomId) {
+function handleJoinRoom(ws, roomId, isHostReconnection = false) {
     const upperRoomId = roomId ? roomId.toUpperCase() : '';
     if (!upperRoomId || !rooms.has(upperRoomId)) {
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room does not exist or has expired' }));
         return;
     }
 
-    const room = rooms.get(upperRoomId);
+    const roomData = rooms.get(upperRoomId);
 
-    // Check if this socket is already registered in the room (reconnection safety)
-    if (!room.has(ws)) {
-        // If the host disconnected briefly and is returning, allow them back in even if size is 1 or 2
-        if (room.size >= 2) {
-            ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
-            return;
-        }
+    // Cancel any pending grace period destruction timer since activity occurred
+    if (roomData.cleanupTimer) {
+        clearTimeout(roomData.cleanupTimer);
+        roomData.cleanupTimer = null;
+        logger.info('Cancelled room expiration grace timer due to activity', { roomId: upperRoomId });
     }
 
-    if (roomCleanupTimers.has(upperRoomId)) {
-        clearTimeout(roomCleanupTimers.get(upperRoomId));
-        roomCleanupTimers.delete(upperRoomId);
-        logger.info('Cancelled room expiration grace timer', { roomId: upperRoomId });
+    // Check if this is the original host reconnecting
+    if (isHostReconnection || roomData.hostSocket === null || roomData.peers.size === 0) {
+        roomData.hostSocket = ws;
+        ws.isHost = true;
+    } else if (roomData.peers.size >= 2 && !roomData.peers.has(ws)) {
+        ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
+        return;
     }
 
-    // Clean any prior room mapping for this socket safely
-    const oldRoomId = clientRooms.get(ws);
-    if (oldRoomId && oldRoomId !== upperRoomId && rooms.has(oldRoomId)) {
-        rooms.get(oldRoomId).delete(ws);
-    }
-
-    room.add(ws);
+    roomData.peers.add(ws);
     clientRooms.set(ws, upperRoomId);
 
-    logger.info('Peer joined or re-linked room', { roomId: upperRoomId, roomSize: room.size });
-    ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId: upperRoomId }));
+    logger.info('Peer joined or re-linked room', { roomId: upperRoomId, roomSize: roomData.peers.size, isHost: !!ws.isHost });
+    ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId: upperRoomId, isHost: !!ws.isHost }));
 
-    // Notify other peer in room
-    for (const peer of room) {
+    // Notify other peers in the room
+    for (const peer of roomData.peers) {
         if (peer !== ws && peer.readyState === WebSocket.OPEN) {
             peer.send(JSON.stringify({ type: 'PEER_JOINED' }));
-            logger.info('Dispatched PEER_JOINED to peer', { roomId: upperRoomId });
+            logger.info('Dispatched PEER_JOINED notification', { roomId: upperRoomId });
         }
     }
 }
@@ -142,8 +135,8 @@ function relayToPeer(ws, message) {
         return;
     }
 
-    const room = rooms.get(roomId);
-    for (const peer of room) {
+    const roomData = rooms.get(roomId);
+    for (const peer of roomData.peers) {
         if (peer !== ws && peer.readyState === WebSocket.OPEN) {
             peer.send(JSON.stringify(message));
         }
@@ -153,36 +146,34 @@ function relayToPeer(ws, message) {
 function handleDisconnect(ws) {
     const roomId = clientRooms.get(ws);
     if (roomId && rooms.has(roomId)) {
-        const room = rooms.get(roomId);
-        room.delete(ws);
+        const roomData = rooms.get(roomId);
+        roomData.peers.delete(ws);
 
-        logger.info('Peer left room', { roomId, remainingPeers: room.size });
+        logger.info('Peer disconnected from room context', { roomId, remainingPeers: roomData.peers.size });
 
-        for (const peer of room) {
+        for (const peer of roomData.peers) {
             if (peer.readyState === WebSocket.OPEN) {
                 peer.send(JSON.stringify({ type: 'PEER_LEFT' }));
             }
         }
 
-        if (room.size === 0) {
+        // If all peers left, start a 2-minute grace timer instead of immediate destruction
+        if (roomData.peers.size === 0) {
             logger.info('Room is empty. Starting 2-minute expiration grace period', { roomId });
             
-            if (roomCleanupTimers.has(roomId)) {
-                clearTimeout(roomCleanupTimers.get(roomId));
+            if (roomData.cleanupTimer) {
+                clearTimeout(roomData.cleanupTimer);
             }
 
-            const timer = setTimeout(() => {
+            roomData.cleanupTimer = setTimeout(() => {
                 if (rooms.has(roomId)) {
                     const currentRoom = rooms.get(roomId);
-                    if (currentRoom.size === 0) {
+                    if (currentRoom.peers.size === 0) {
                         rooms.delete(roomId);
                         logger.info('Room deleted due to expiration grace period timeout', { roomId });
                     }
                 }
-                roomCleanupTimers.delete(roomId);
-            }, 120000); // 2 minutes grace period
-
-            roomCleanupTimers.set(roomId, timer);
+            }, 120000); // 2 minutes
         }
     }
 
