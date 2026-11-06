@@ -1,3 +1,8 @@
+/**
+ * PRIVORA Settings Component
+ * Robust configuration dashboard with safe DOM querying and error protection.
+ */
+
 import { getUserSettings, saveUserSettings } from '../core/settings.state.js';
 import { getState } from '../core/state.js';
 import { showToast } from '../utils/notifier.js';
@@ -5,8 +10,14 @@ import { rtcManager } from '../network/webrtc.manager.js';
 
 export function renderSettings() {
     const settings = getUserSettings();
-    const appState = getState();
-    const isConnected = appState.session.isConnected && rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
+    let appState = { session: { roomId: null } };
+    try {
+        appState = getState() || appState;
+    } catch (e) {
+        console.warn('State retrieval warning in settings:', e);
+    }
+
+    const isConnected = appState.session && appState.session.isConnected && rtcManager && rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
 
     const container = document.createElement('div');
     container.className = 'max-w-4xl mx-auto space-y-6 animate-fade-in pb-12';
@@ -18,7 +29,7 @@ export function renderSettings() {
                 <h2 class="text-base font-semibold text-white">Settings, Privacy & Security</h2>
                 <p class="text-xs text-slate-400 mt-0.5">Manage your application preferences, privacy controls, and P2P cryptographic security.</p>
             </div>
-            <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-accent-500/10 text-accent-400 border border-accent-500/20">PRIVORA v2.4</span>
+            <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-accent-500/10 text-accent-400 border border-accent-500/20">PRIVORA v2.5</span>
         </div>
 
         <!-- Settings Grid / Tabs -->
@@ -161,70 +172,79 @@ export function renderSettings() {
         </div>
     `;
 
-    // Tab switching logic
-    const tabButtons = container.querySelectorAll('.settings-tab-btn');
-    const tabContents = container.querySelectorAll('.settings-tab-content');
+    // Safe event listener binding
+    setTimeout(() => {
+        const tabButtons = container.querySelectorAll('.settings-tab-btn');
+        const tabContents = container.querySelectorAll('.settings-tab-content');
 
-    tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetTab = btn.dataset.tab;
-            
-            tabButtons.forEach(b => {
-                b.classList.remove('bg-accent-600', 'text-white');
-                b.classList.add('text-slate-300');
+        tabButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetTab = btn.dataset.tab;
+                
+                tabButtons.forEach(b => {
+                    b.classList.remove('bg-accent-600', 'text-white');
+                    b.classList.add('text-slate-300');
+                });
+                btn.classList.add('bg-accent-600', 'text-white');
+                btn.classList.remove('text-slate-300');
+
+                tabContents.forEach(content => {
+                    if (content.id === `tab-${targetTab}`) {
+                        content.classList.remove('hidden');
+                    } else {
+                        content.classList.add('hidden');
+                    }
+                });
             });
-            btn.classList.add('bg-accent-600', 'text-white');
-            btn.classList.remove('text-slate-300');
+        });
 
-            tabContents.forEach(content => {
-                if (content.id === `tab-${targetTab}`) {
-                    content.classList.remove('hidden');
-                } else {
-                    content.classList.add('hidden');
+        const themeSelect = container.querySelector('#setting-theme');
+        const soundCheckbox = container.querySelector('#setting-sound');
+        const notifCheckbox = container.querySelector('#setting-notifications');
+        const typingCheckbox = container.querySelector('#setting-typing');
+        const receiptsCheckbox = container.querySelector('#setting-receipts');
+        const previewsCheckbox = container.querySelector('#setting-previews');
+
+        const persistChanges = () => {
+            saveUserSettings({
+                theme: themeSelect ? themeSelect.value : 'dark',
+                soundEnabled: soundCheckbox ? soundCheckbox.checked : true,
+                notificationsEnabled: notifCheckbox ? notifCheckbox.checked : true,
+                typingIndicatorsEnabled: typingCheckbox ? typingCheckbox.checked : true,
+                readReceiptsEnabled: receiptsCheckbox ? receiptsCheckbox.checked : true,
+                showNotificationPreviews: previewsCheckbox ? previewsCheckbox.checked : true
+            });
+            showToast('Settings saved successfully', 'success');
+        };
+
+        if (themeSelect) themeSelect.addEventListener('change', persistChanges);
+        if (soundCheckbox) soundCheckbox.addEventListener('change', persistChanges);
+        if (notifCheckbox) notifCheckbox.addEventListener('change', persistChanges);
+        if (typingCheckbox) typingCheckbox.addEventListener('change', persistChanges);
+        if (receiptsCheckbox) receiptsCheckbox.addEventListener('change', persistChanges);
+        if (previewsCheckbox) previewsCheckbox.addEventListener('change', persistChanges);
+
+        const clearHistoryBtn = container.querySelector('#btn-clear-history');
+        if (clearHistoryBtn) {
+            clearHistoryBtn.addEventListener('click', () => {
+                if (rtcManager && typeof rtcManager.clearConversation === 'function') {
+                    rtcManager.clearConversation();
                 }
+                showToast('Local conversation history cleared', 'success');
             });
-        });
-    });
+        }
 
-    // Save settings bindings
-    const themeSelect = container.querySelector('#setting-theme');
-    const soundCheckbox = container.querySelector('#setting-sound');
-    const notifCheckbox = container.querySelector('#setting-notifications');
-    const typingCheckbox = container.querySelector('#setting-typing');
-    const receiptsCheckbox = container.querySelector('#setting-receipts');
-    const previewsCheckbox = container.querySelector('#setting-previews');
-
-    const persistChanges = () => {
-        saveUserSettings({
-            theme: themeSelect.value,
-            soundEnabled: soundCheckbox.checked,
-            notificationsEnabled: notifCheckbox.checked,
-            typingIndicatorsEnabled: typingCheckbox.checked,
-            readReceiptsEnabled: receiptsCheckbox.checked,
-            showNotificationPreviews: previewsCheckbox.checked
-        });
-        showToast('Settings saved successfully', 'success');
-    };
-
-    themeSelect.addEventListener('change', persistChanges);
-    soundCheckbox.addEventListener('change', persistChanges);
-    notifCheckbox.addEventListener('change', persistChanges);
-    typingCheckbox.addEventListener('change', persistChanges);
-    receiptsCheckbox.addEventListener('change', persistChanges);
-    previewsCheckbox.addEventListener('change', persistChanges);
-
-    // Clear history action
-    container.querySelector('#btn-clear-history').addEventListener('click', () => {
-        rtcManager.clearConversation();
-        showToast('Local conversation history cleared', 'success');
-    });
-
-    // Terminate session action
-    container.querySelector('#btn-terminate-session').addEventListener('click', () => {
-        rtcManager.closeConnection();
-        showToast('Active session terminated and memory purged', 'info');
-        window.location.hash = '#home';
-    });
+        const terminateSessionBtn = container.querySelector('#btn-terminate-session');
+        if (terminateSessionBtn) {
+            terminateSessionBtn.addEventListener('click', () => {
+                if (rtcManager && typeof rtcManager.closeConnection === 'function') {
+                    rtcManager.closeConnection();
+                }
+                showToast('Active session terminated and memory purged', 'info');
+                window.location.hash = '#home';
+            });
+        }
+    }, 0);
 
     return container;
 }
