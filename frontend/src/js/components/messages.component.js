@@ -4,118 +4,174 @@ import { rtcManager } from '../network/webrtc.manager.js';
 
 let typingTimeout = null;
 let selectedFilesToAttach = [];
+let showMobileChat = false;
+let searchQuery = '';
 
 export function renderMessages() {
     const state = getState();
     const isConnected = state.session.isConnected && rtcManager.dataChannel && rtcManager.dataChannel.readyState === 'open';
 
     const container = document.createElement('div');
-    container.className = 'grid grid-cols-1 md:grid-cols-4 gap-6 h-[calc(100vh-8rem)] animate-fade-in max-w-7xl mx-auto';
+    container.className = 'h-[calc(100vh-5rem)] max-w-7xl mx-auto flex flex-col md:flex-row bg-white border border-border rounded-2xl overflow-hidden shadow-sm animate-fade-in';
 
     container.innerHTML = `
-        <!-- Sidebar Conversation List -->
-        <div class="bg-white border border-border rounded-2xl flex flex-col overflow-hidden shadow-2xs">
-            <div class="p-4 border-b border-border flex items-center justify-between bg-ivory-700/30">
-                <h3 class="text-sm font-semibold text-charcoal">Secure Chats</h3>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-ivory-900 text-forest-800 border border-sage font-medium">AES-GCM-256</span>
-            </div>
-            <div class="p-3">
-                <input type="text" placeholder="Search secure sessions..." class="w-full bg-ivory-800 border border-border rounded-xl px-3 py-2 text-xs text-charcoal placeholder:text-charcoal-muted focus:outline-none focus:border-forest-800">
-            </div>
-            <div class="flex-1 overflow-y-auto p-2 space-y-1">
-                <div class="p-3 rounded-xl bg-ivory-800/60 border border-border cursor-pointer shadow-2xs">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs font-semibold text-charcoal">Peer Room #${state.session.roomId || 'DEFAULT'}</span>
-                        <span id="sidebar-status-badge" class="text-[10px] ${isConnected ? 'text-forest-800' : 'text-brown-800'} font-mono font-medium">${isConnected ? 'Active' : 'Standby'}</span>
+        <!-- LEFT PANEL — Conversation List -->
+        <div id="conversations-sidebar" class="${showMobileChat ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-white flex-shrink-0">
+            <!-- Header -->
+            <div class="p-4 border-b border-border flex items-center justify-between bg-ivory-700/40">
+                <div class="flex items-center gap-2.5">
+                    <div class="h-9 w-9 rounded-xl bg-forest-800 flex items-center justify-center text-white font-bold text-xs shadow-xs">
+                        PR
                     </div>
-                    <p class="text-[11px] text-charcoal-muted truncate mt-1">End-to-end encrypted DataChannel chat</p>
+                    <div>
+                        <h3 class="text-sm font-semibold text-charcoal leading-tight">PRIVORA Messages</h3>
+                        <p class="text-[10px] font-mono text-forest-800 font-medium">E2EE DataChannel</p>
+                    </div>
+                </div>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded-full ${isConnected ? 'bg-forest-800/10 text-forest-800 border border-forest-800/20' : 'bg-brown-800/10 text-brown-800 border border-brown-800/20'} font-medium">
+                    ${isConnected ? 'AES-GCM-256' : 'Standby'}
+                </span>
+            </div>
+
+            <!-- Search -->
+            <div class="p-3 border-b border-border bg-white">
+                <div class="relative">
+                    <svg class="w-4 h-4 text-charcoal-muted absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input type="text" id="conversation-search" value="${escapeHtml(searchQuery)}" placeholder="Search sessions or messages..." class="w-full bg-ivory-800 border border-border rounded-xl pl-9 pr-3 py-2 text-xs text-charcoal placeholder:text-charcoal-muted focus:outline-none focus:border-forest-800 transition-colors">
                 </div>
             </div>
-            <div class="p-3 border-t border-border">
-                <button id="btn-clear-chat" class="w-full py-2 bg-white hover:bg-ivory-800 text-charcoal border border-border rounded-xl text-xs font-medium transition-all shadow-2xs">
+
+            <!-- Conversation Entries -->
+            <div class="flex-1 overflow-y-auto p-2 space-y-1 bg-ivory-800/20">
+                <div id="active-session-item" class="p-3 rounded-xl bg-ivory-800 border border-sage/50 cursor-pointer transition-all hover:border-forest-800 shadow-2xs">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2.5 overflow-hidden">
+                            <div class="h-8 w-8 rounded-full bg-forest-800 text-white font-mono text-xs font-bold flex items-center justify-center flex-shrink-0">
+                                P2
+                            </div>
+                            <div class="overflow-hidden">
+                                <h4 class="text-xs font-semibold text-charcoal truncate">Peer Room #${state.session.roomId || 'DEFAULT'}</h4>
+                                <p class="text-[11px] text-charcoal-muted truncate mt-0.5" id="sidebar-last-msg">
+                                    ${getLastMessagePreview()}
+                                </p>
+                            </div>
+                        </div>
+                        <span id="sidebar-status-badge" class="text-[10px] ${isConnected ? 'text-forest-800 font-semibold' : 'text-brown-800'} font-mono ml-2 flex-shrink-0">
+                            ${isConnected ? 'Active' : 'Standby'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Footer -->
+            <div class="p-3 border-t border-border bg-white">
+                <button id="btn-clear-chat" class="w-full py-2 bg-ivory-800 hover:bg-ivory-900 text-charcoal border border-border rounded-xl text-xs font-medium transition-all shadow-2xs flex items-center justify-center gap-2">
+                    <svg class="w-3.5 h-3.5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
                     Clear Conversation
                 </button>
             </div>
         </div>
 
-        <!-- Active Chat Window -->
-        <div class="md:col-span-3 bg-white border border-border rounded-2xl flex flex-col overflow-hidden relative shadow-2xs">
-            <!-- Chat Header -->
-            <div class="p-4 border-b border-border flex items-center justify-between bg-white">
+        <!-- RIGHT PANEL — Main Chat Window -->
+        <div id="main-chat-panel" class="${showMobileChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-white overflow-hidden relative">
+            <!-- Header -->
+            <div class="p-4 border-b border-border flex items-center justify-between bg-white z-10 shadow-2xs">
                 <div class="flex items-center gap-3">
-                    <div class="h-9 w-9 rounded-full bg-ivory-800 border border-border flex items-center justify-center text-forest-800 font-mono text-xs font-bold">P2</div>
+                    <button id="btn-mobile-back" class="md:hidden text-charcoal hover:text-forest-800 p-1.5 rounded-lg bg-ivory-800 border border-border">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                        </svg>
+                    </button>
+                    <div class="h-9 w-9 rounded-full bg-forest-800 text-white font-mono text-xs font-bold flex items-center justify-center flex-shrink-0">
+                        P2
+                    </div>
                     <div>
                         <h4 class="text-xs font-semibold text-charcoal">Peer Connection Room #${state.session.roomId || 'None'}</h4>
-                        <p id="chat-sub-status" class="text-[10px] ${isConnected ? 'text-forest-800 font-medium' : 'text-brown-800'} font-mono">${isConnected ? 'Encrypted via Web Crypto API (HKDF-AES-GCM)' : 'Waiting for DataChannel connection...'}</p>
+                        <p id="chat-sub-status" class="text-[10px] ${isConnected ? 'text-forest-800 font-medium' : 'text-brown-800'} font-mono">
+                            ${isConnected ? 'Encrypted via Web Crypto API (HKDF-AES-GCM)' : 'Waiting for DataChannel connection...'}
+                        </p>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <div class="flex items-center gap-2">
-                        <span id="chat-status-dot" class="h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-forest-800 animate-pulse' : 'bg-brown-800'}"></span>
-                        <span id="chat-status-text" class="text-xs font-mono text-charcoal-muted font-medium">${isConnected ? 'Connected' : 'Disconnected'}</span>
-                    </div>
+                <div class="flex items-center gap-2">
+                    <span id="chat-status-dot" class="h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-forest-800 animate-pulse' : 'bg-brown-800'}"></span>
+                    <span id="chat-status-text" class="text-xs font-mono text-charcoal-muted font-medium hidden sm:inline">
+                        ${isConnected ? 'Connected' : 'Disconnected'}
+                    </span>
                 </div>
             </div>
 
-            <!-- Messages Stream Area -->
-            <div id="chat-messages-container" class="flex-1 overflow-y-auto p-6 space-y-1 bg-ivory-800/40">
-                <div class="flex justify-center mb-3">
-                    <div class="px-3 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
-                        🔒 All messages and files are end-to-end encrypted.
+            <!-- Message History Area -->
+            <div id="chat-messages-container" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-1 bg-ivory-800/40">
+                <div class="flex justify-center mb-4">
+                    <div class="px-3.5 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
+                        🔒 End-to-end encrypted direct WebRTC stream.
                     </div>
                 </div>
                 ${renderMessagesList()}
             </div>
 
-            <!-- Incoming Transfer Banner / Prompt -->
-            <div id="incoming-transfer-banner" class="hidden absolute bottom-20 left-6 right-6 bg-white border border-sage rounded-2xl p-4 shadow-xl flex items-center justify-between z-20 animate-fade-in">
-                <div class="flex items-center gap-3">
-                    <div class="h-10 w-10 rounded-xl bg-ivory-800 border border-sage flex items-center justify-center text-forest-800">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            <!-- Incoming File Banner Prompt -->
+            <div id="incoming-transfer-banner" class="hidden absolute bottom-20 left-4 right-4 sm:left-6 sm:right-6 bg-white border border-sage rounded-2xl p-4 shadow-xl flex items-center justify-between z-20 animate-fade-in">
+                <div class="flex items-center gap-3 overflow-hidden">
+                    <div class="h-10 w-10 rounded-xl bg-ivory-800 border border-sage flex items-center justify-center text-forest-800 flex-shrink-0">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                        </svg>
                     </div>
-                    <div>
-                        <h5 class="text-xs font-semibold text-charcoal" id="incoming-file-name">Incoming File</h5>
+                    <div class="overflow-hidden">
+                        <h5 class="text-xs font-semibold text-charcoal truncate" id="incoming-file-name">Incoming File</h5>
                         <p class="text-[10px] text-charcoal-muted font-mono" id="incoming-file-meta">Size: 0 KB</p>
                     </div>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-shrink-0">
                     <button id="btn-decline-file" class="px-3 py-1.5 bg-ivory-800 hover:bg-ivory-900 text-charcoal border border-border rounded-xl text-xs font-medium transition-colors">Decline</button>
-                    <button id="btn-accept-file" class="px-3 py-1.5 bg-forest-800 hover:bg-forest-700 text-white rounded-xl text-xs font-medium shadow-sm transition-colors">Accept & Download</button>
+                    <button id="btn-accept-file" class="px-3 py-1.5 bg-forest-800 hover:bg-forest-700 text-white rounded-xl text-xs font-medium shadow-sm transition-colors">Accept Transfer</button>
                 </div>
             </div>
 
             <!-- Attachment Preview Area -->
-            <div id="attachment-preview-container" class="hidden px-6 py-2 bg-white border-t border-border flex items-center gap-3">
-                <div class="flex items-center gap-2 bg-ivory-800 border border-border rounded-xl px-3 py-1.5 text-xs text-charcoal">
-                    <svg class="w-4 h-4 text-forest-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+            <div id="attachment-preview-container" class="hidden px-4 sm:px-6 py-2 bg-white border-t border-border flex items-center gap-3">
+                <div class="flex items-center gap-2 bg-ivory-800 border border-border rounded-xl px-3 py-1.5 text-xs text-charcoal overflow-hidden">
+                    <svg class="w-4 h-4 text-forest-800 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                    </svg>
                     <span id="preview-file-name" class="font-mono text-[11px] truncate max-w-xs text-charcoal">file.ext</span>
                     <button id="btn-remove-attachment" class="text-charcoal-muted hover:text-charcoal ml-2 font-bold">&times;</button>
                 </div>
-                <span class="text-[10px] text-charcoal-muted font-mono">Ready to send via secure P2P channel</span>
+                <span class="text-[10px] text-charcoal-muted font-mono hidden sm:inline">Ready to send encrypted</span>
             </div>
 
-            <!-- Typing Indicator Area -->
-            <div id="typing-indicator-area" class="px-6 py-1 text-[11px] text-forest-800 font-mono italic hidden bg-white">
+            <!-- Typing Indicator -->
+            <div id="typing-indicator-area" class="px-6 py-1 text-[11px] text-forest-800 font-mono italic hidden bg-white border-t border-border/50">
                 Peer is typing...
             </div>
 
-            <!-- Message Input Form -->
-            <div class="p-4 border-t border-border bg-white">
-                <form id="chat-form" class="flex items-center gap-3">
+            <!-- Message Composer -->
+            <div class="p-3 sm:p-4 border-t border-border bg-white">
+                <form id="chat-form" class="flex items-center gap-2 sm:gap-3">
                     <input type="file" id="chat-file-input" multiple class="hidden">
-                    <button type="button" id="btn-attach-file" ${!isConnected ? 'disabled' : ''} class="p-2.5 bg-ivory-800 hover:bg-ivory-900 text-charcoal border border-border rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs" title="Attach files">
-                        <svg class="w-4 h-4 text-forest-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                    <button type="button" id="btn-attach-file" ${!isConnected ? 'disabled' : ''} class="p-2.5 bg-ivory-800 hover:bg-ivory-900 text-charcoal border border-border rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs flex-shrink-0" title="Attach files">
+                        <svg class="w-4 h-4 text-forest-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                        </svg>
                     </button>
                     <input type="text" id="chat-input" ${!isConnected ? 'disabled' : ''} placeholder="${isConnected ? 'Type an encrypted message...' : 'Connect to a room to start messaging...'}" class="flex-1 bg-ivory-800 border border-border rounded-xl px-4 py-2.5 text-xs text-charcoal placeholder:text-charcoal-muted focus:outline-none focus:border-forest-800 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <button type="submit" ${!isConnected ? 'disabled' : ''} class="px-4 py-2.5 bg-forest-800 hover:bg-forest-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center gap-2">
-                        <span>Send</span>
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                    <button type="submit" ${!isConnected ? 'disabled' : ''} class="px-4 py-2.5 bg-forest-800 hover:bg-forest-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center gap-2 flex-shrink-0">
+                        <span class="hidden sm:inline">Send</span>
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                        </svg>
                     </button>
                 </form>
             </div>
         </div>
     `;
 
+    // DOM References
     const chatForm = container.querySelector('#chat-form');
     const chatInput = container.querySelector('#chat-input');
     const messagesContainer = container.querySelector('#chat-messages-container');
@@ -125,6 +181,9 @@ export function renderMessages() {
     const previewContainer = container.querySelector('#attachment-preview-container');
     const previewFileName = container.querySelector('#preview-file-name');
     const removeAttachmentBtn = container.querySelector('#btn-remove-attachment');
+    const searchInput = container.querySelector('#conversation-search');
+    const mobileBackBtn = container.querySelector('#btn-mobile-back');
+    const activeSessionItem = container.querySelector('#active-session-item');
 
     const incomingBanner = container.querySelector('#incoming-transfer-banner');
     const incomingFileName = container.querySelector('#incoming-file-name');
@@ -134,6 +193,24 @@ export function renderMessages() {
 
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
+    // Mobile Navigation
+    activeSessionItem.addEventListener('click', () => {
+        showMobileChat = true;
+        refreshChatDOM(container);
+    });
+
+    mobileBackBtn.addEventListener('click', () => {
+        showMobileChat = false;
+        refreshChatDOM(container);
+    });
+
+    // Search Filtering
+    searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value.toLowerCase();
+        refreshChatDOM(container);
+    });
+
+    // Attachment Actions
     attachBtn.addEventListener('click', () => fileInput.click());
 
     fileInput.addEventListener('change', (e) => {
@@ -150,6 +227,7 @@ export function renderMessages() {
         previewContainer.classList.add('hidden');
     });
 
+    // Typing Indicators
     chatInput.addEventListener('input', () => {
         rtcManager.sendTypingIndicator(true);
         clearTimeout(typingTimeout);
@@ -158,6 +236,7 @@ export function renderMessages() {
         }, 1500);
     });
 
+    // Submit Handler
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
@@ -180,15 +259,17 @@ export function renderMessages() {
         }
     });
 
+    // Clear Conversation
     container.querySelector('#btn-clear-chat').addEventListener('click', () => {
         rtcManager.clearConversation();
         refreshChatDOM(container);
         showToast('Conversation cleared', 'info');
     });
 
+    // RTC Event Listeners
     rtcManager.on('incoming_transfer', (meta) => {
         incomingFileName.textContent = meta.name;
-        incomingFileMeta.textContent = `Size: ${(meta.size / 1024).toFixed(1)} KB — Secure P2P Transfer`;
+        incomingFileMeta.textContent = `Size: ${(meta.size / 1024).toFixed(1)} KB — Encrypted P2P`;
         incomingBanner.classList.remove('hidden');
         incomingBanner.dataset.transferId = meta.transferId;
     });
@@ -211,20 +292,7 @@ export function renderMessages() {
         }
     });
 
-    rtcManager.on('transfer_completed', (transfer) => {
-        refreshChatDOM(container);
-        if (transfer.blob) {
-            const url = URL.createObjectURL(transfer.blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = transfer.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-    });
-
+    rtcManager.on('transfer_completed', () => refreshChatDOM(container));
     rtcManager.on('transfer_progress', () => refreshChatDOM(container));
     rtcManager.on('transfer_initiated', () => refreshChatDOM(container));
     rtcManager.on('chat_message_received', () => refreshChatDOM(container));
@@ -261,28 +329,35 @@ function renderMessagesList() {
     });
 
     rtcManager.incomingTransfers.forEach((t) => {
-        if (t.status !== 'completed') {
-            items.push({
-                type: 'FILE_TRANSFER_INCOMING',
-                messageId: t.transferId,
-                localOrder: t.localOrder || 0,
-                timestamp: t.timestamp || Date.now(),
-                name: t.name,
-                size: t.size,
-                status: t.status || 'incoming',
-                blob: t.blob,
-                direction: 'incoming'
-            });
-        }
+        items.push({
+            type: 'FILE_TRANSFER_INCOMING',
+            messageId: t.transferId,
+            localOrder: t.localOrder || 0,
+            timestamp: t.timestamp || Date.now(),
+            name: t.name,
+            size: t.size,
+            status: t.status || 'incoming',
+            blob: t.blob,
+            direction: 'incoming'
+        });
     });
 
-    // Sort strictly by local append sequence order to prevent clock skew / backdating issues
+    // Sequence sorting
     items.sort((a, b) => (a.localOrder || 0) - (b.localOrder || 0));
+
+    // Search filter
+    if (searchQuery) {
+        items = items.filter(i => {
+            if (i.text) return i.text.toLowerCase().includes(searchQuery);
+            if (i.name) return i.name.toLowerCase().includes(searchQuery);
+            return false;
+        });
+    }
 
     if (items.length === 0) {
         return `
             <div class="flex flex-col items-center justify-center h-48 text-center text-charcoal-muted">
-                <p class="text-xs font-medium text-charcoal">No messages in this secure session yet.</p>
+                <p class="text-xs font-medium text-charcoal">No messages in this session yet.</p>
                 <p class="text-[10px] mt-1 text-charcoal-muted">Type or attach files below to start end-to-end encrypted sharing.</p>
             </div>
         `;
@@ -298,22 +373,35 @@ function renderMessagesList() {
         );
 
         const marginClass = isPrevSameSender ? 'mt-0.5 mb-1' : 'my-2.5';
-
-        let roundedClass = '';
-        if (isOutgoing) {
-            roundedClass = isPrevSameSender ? 'rounded-2xl rounded-tr-md rounded-br-md' : 'rounded-2xl rounded-br-xs';
-        } else {
-            roundedClass = isPrevSameSender ? 'rounded-2xl rounded-tl-md rounded-bl-md' : 'rounded-2xl rounded-bl-xs';
-        }
+        const roundedClass = isOutgoing
+            ? (isPrevSameSender ? 'rounded-2xl rounded-tr-md rounded-br-md' : 'rounded-2xl rounded-br-xs')
+            : (isPrevSameSender ? 'rounded-2xl rounded-tl-md rounded-bl-md' : 'rounded-2xl rounded-bl-xs');
 
         if (item.type === 'FILE_TRANSFER_OUTGOING' || item.type === 'FILE_TRANSFER_INCOMING') {
             const isCompleted = item.status === 'completed';
+            let downloadBtnHtml = '';
+
+            if (isCompleted && item.blob) {
+                const blobUrl = URL.createObjectURL(item.blob);
+                downloadBtnHtml = `
+                    <a href="${blobUrl}" download="${escapeHtml(item.name)}" 
+                       class="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-forest-800 hover:bg-forest-700 text-white text-[11px] font-medium rounded-xl shadow-2xs transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        Download File
+                    </a>
+                `;
+            }
+
             return `
                 <div class="flex items-end gap-2 ${marginClass} ${isOutgoing ? 'justify-end' : 'justify-start'}">
-                    <div class="${isOutgoing ? 'bg-forest-800 text-white' : 'bg-white text-charcoal border border-border'} ${roundedClass} p-3 max-w-xs shadow-2xs w-72">
+                    <div class="${isOutgoing ? 'bg-forest-800 text-white' : 'bg-white text-charcoal border border-border'} ${roundedClass} p-3.5 max-w-xs shadow-2xs w-72">
                         <div class="flex items-center gap-2.5">
                             <div class="h-8 w-8 rounded-lg ${isOutgoing ? 'bg-white/10 text-white' : 'bg-ivory-800 text-charcoal'} flex items-center justify-center flex-shrink-0">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                </svg>
                             </div>
                             <div class="overflow-hidden flex-1">
                                 <h6 class="text-xs font-medium truncate ${isOutgoing ? 'text-white' : 'text-charcoal'}">${escapeHtml(item.name)}</h6>
@@ -325,6 +413,7 @@ function renderMessagesList() {
                                 <div class="${isOutgoing ? 'bg-white' : 'bg-forest-800'} h-1 transition-all duration-300" style="width: ${item.progress || 0}%"></div>
                             </div>
                         ` : ''}
+                        ${downloadBtnHtml}
                         <div class="flex items-center justify-end gap-1.5 mt-1.5">
                             <span class="text-[9px] ${isOutgoing ? 'text-ivory-900' : 'text-charcoal-muted'} font-mono">${timeStr}</span>
                         </div>
@@ -349,18 +438,38 @@ function renderMessagesList() {
     }).join('');
 }
 
+function getLastMessagePreview() {
+    const msgs = rtcManager.chatMessages || [];
+    if (msgs.length === 0) return 'End-to-end encrypted DataChannel chat';
+    const last = msgs[msgs.length - 1];
+    return last.text ? escapeHtml(last.text) : 'File attachment';
+}
+
 function refreshChatDOM(container) {
+    const sidebar = container.querySelector('#conversations-sidebar');
+    const mainChat = container.querySelector('#main-chat-panel');
+
+    if (sidebar && mainChat) {
+        sidebar.className = `${showMobileChat ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-white flex-shrink-0`;
+        mainChat.className = `${showMobileChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-white overflow-hidden relative`;
+    }
+
     const messagesContainer = container.querySelector('#chat-messages-container');
     if (messagesContainer) {
         messagesContainer.innerHTML = `
-            <div class="flex justify-center mb-3">
-                <div class="px-3 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
-                    🔒 All messages and files are end-to-end encrypted.
+            <div class="flex justify-center mb-4">
+                <div class="px-3.5 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
+                    🔒 End-to-end encrypted direct WebRTC stream.
                 </div>
             </div>
             ${renderMessagesList()}
         `;
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    const lastMsgEl = container.querySelector('#sidebar-last-msg');
+    if (lastMsgEl) {
+        lastMsgEl.textContent = getLastMessagePreview();
     }
 }
 
