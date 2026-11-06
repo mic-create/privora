@@ -25,6 +25,10 @@ class WebRTCManager {
         this.chatMessages = [];
         this.lastSeenSequence = 0;
 
+        // Audio Call State
+        this.localAudioStream = null;
+        this.remoteAudioElement = null;
+
         this.config = {
             iceServers: config.iceServers || [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -83,7 +87,7 @@ class WebRTCManager {
             this.roomId = roomId;
             this.isHost = true;
             const keys = await generateSessionKeys();
-            await this._initSubkeys(keys.key, true); // Host keys are authoritative
+            await this._initSubkeys(keys.key, true);
             this.sessionKeyBase64 = keys.rawBase64;
             this._emit('room_created', roomId);
         });
@@ -91,7 +95,6 @@ class WebRTCManager {
         this.signalingClient.on('room_joined', async (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
-            // Joining peer starts un-synchronized until KEY_EXCHANGE arrives from host
             this.isKeySynchronized = false;
             this._emit('room_joined', roomId);
             this._createPeerConnection();
@@ -121,6 +124,23 @@ class WebRTCManager {
 
         this.signalingClient.on('ice_candidate', async (candidate) => {
             await this._handleIceCandidate(candidate);
+        });
+
+        // Audio Call Signaling Listeners
+        this.signalingClient.on('audio_call_offer', async (offer) => {
+            this._emit('incoming_audio_call', offer);
+        });
+
+        this.signalingClient.on('audio_call_answer', async (answer) => {
+            if (this.peerConnection) {
+                await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                this._emit('call_state_change', 'connected');
+            }
+        });
+
+        this.signalingClient.on('audio_call_end', () => {
+            this.endAudioCall();
+            showToast('Audio call ended by peer', 'info');
         });
     }
 
@@ -158,6 +178,20 @@ class WebRTCManager {
             if (state === 'connected') this._clearConnectionTimeout();
         };
 
+        // Handle incoming remote audio tracks for live calls
+        this.peerConnection.ontrack = (event) => {
+            if (event.streams && event.streams[0]) {
+                if (!this.remoteAudioElement) {
+                    this.remoteAudioElement = document.createElement('audio');
+                    this.remoteAudioElement.autoplay = true;
+                    document.body.appendChild(this.remoteAudioElement);
+                }
+                this.remoteAudioElement.srcObject = event.streams[0];
+                this._emit('call_state_change', 'connected');
+                showToast('Live audio call connected', 'success');
+            }
+        };
+
         if (this.isHost) {
             try {
                 this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
@@ -185,7 +219,6 @@ class WebRTCManager {
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
 
-            // If host, transmit session key immediately upon channel open
             if (this.isHost && this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
@@ -210,7 +243,7 @@ class WebRTCManager {
                 const msg = JSON.parse(data);
                 if (msg.type === 'KEY_EXCHANGE') {
                     const masterKey = await importSessionKey(msg.key);
-                    await this._initSubkeys(masterKey, true); // Mark keys fully synchronized
+                    await this._initSubkeys(masterKey, true);
                     showToast('Encryption keys synchronized securely', 'success');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
                     if (!this.isKeySynchronized || !this.chatKey) {
@@ -250,7 +283,7 @@ class WebRTCManager {
                 } else if (msg.type === 'TYPING_INDICATOR') {
                     this._emit('peer_typing', msg.isTyping);
                 } else if (msg.type === 'FILE_META') {
-                    this.incomingTransfers.set(msg.transferId, {
+                    const transferObj = {
                         transferId: msg.transferId,
                         name: msg.name,
                         size: msg.size,
@@ -258,9 +291,17 @@ class WebRTCManager {
                         totalChunks: msg.chunks,
                         expectedHash: msg.sha256,
                         receivedChunks: 0,
-                        chunksArray: []
-                    });
+                        chunksArray: [],
+                        isVoiceMessage: msg.isVoiceMessage || false,
+                        duration: msg.duration || 0
+                    };
+                    this.incomingTransfers.set(msg.transferId, transferObj);
                     this._emit('incoming_transfer', msg);
+                    
+                    // Auto-accept voice messages for instant playback availability
+                    if (msg.isVoiceMessage) {
+                        this.acceptTransfer(msg.transferId);
+                    }
                 } else if (msg.type === 'FILE_ACCEPT') {
                     const transfer = this.activeTransfers.get(msg.transferId);
                     if (transfer) {
@@ -284,7 +325,9 @@ class WebRTCManager {
                     if (transfer) {
                         transfer.status = 'completed';
                         this._emit('transfer_completed', transfer);
-                        showToast(`Successfully sent and verified ${transfer.name}`, 'success');
+                        if (!transfer.isVoiceMessage) {
+                            showToast(`Successfully sent and verified ${transfer.name}`, 'success');
+                        }
                     }
                 }
             } catch (err) {
@@ -324,7 +367,9 @@ class WebRTCManager {
                             transfer.blob = completeBlob;
                             transfer.status = 'completed';
                             this._emit('transfer_completed', transfer);
-                            showToast(`Verified & received ${transfer.name}`, 'success');
+                            if (!transfer.isVoiceMessage) {
+                                showToast(`Verified & received ${transfer.name}`, 'success');
+                            }
 
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({ type: 'TRANSFER_SUCCESS_ACK', transferId: transfer.transferId }));
@@ -425,7 +470,8 @@ class WebRTCManager {
                 sha256,
                 sentChunks: 0,
                 status: 'waiting_for_acceptance',
-                progress: 0
+                progress: 0,
+                isVoiceMessage: false
             };
 
             this.activeTransfers.set(transferId, transferRecord);
@@ -439,9 +485,62 @@ class WebRTCManager {
                     size: file.size,
                     fileType: file.type,
                     chunks: totalChunks,
-                    sha256
+                    sha256,
+                    isVoiceMessage: false
                 }));
             }
+        }
+    }
+
+    async sendVoiceMessage(audioBlob, durationSec) {
+        if (!this.fileKey || !this.isKeySynchronized) {
+            const keys = await generateSessionKeys();
+            await this._initSubkeys(keys.key, true);
+            this.sessionKeyBase64 = keys.rawBase64;
+            if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
+            }
+        }
+
+        const transferId = Math.random().toString(36).substring(2, 11);
+        const arrayBuf = await audioBlob.arrayBuffer();
+        const sha256 = await calculateFileHash(arrayBuf);
+        const CHUNK_SIZE = 16 * 1024;
+        const totalChunks = Math.ceil(arrayBuf.byteLength / CHUNK_SIZE);
+
+        const transferRecord = {
+            transferId,
+            file: audioBlob,
+            name: `voice-message-${Date.now()}.webm`,
+            size: audioBlob.size,
+            fileType: audioBlob.type || 'audio/webm',
+            arrayBuf,
+            CHUNK_SIZE,
+            totalChunks,
+            sha256,
+            sentChunks: 0,
+            status: 'transferring',
+            progress: 0,
+            isVoiceMessage: true,
+            duration: durationSec
+        };
+
+        this.activeTransfers.set(transferId, transferRecord);
+        this._emit('transfer_initiated', transferRecord);
+
+        if (this.dataChannel && this.dataChannel.readyState === 'open') {
+            this.dataChannel.send(JSON.stringify({
+                type: 'FILE_META',
+                transferId,
+                name: transferRecord.name,
+                size: audioBlob.size,
+                fileType: transferRecord.fileType,
+                chunks: totalChunks,
+                sha256,
+                isVoiceMessage: true,
+                duration: durationSec
+            }));
+            await this._streamFileChunks(transferRecord);
         }
     }
 
@@ -500,6 +599,89 @@ class WebRTCManager {
                 break;
             }
         }
+    }
+
+    // Live Audio Call Methods
+    async startAudioCall() {
+        try {
+            this.localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            if (!this.peerConnection) this._createPeerConnection();
+
+            for (const track of this.localAudioStream.getTracks()) {
+                this.peerConnection.addTrack(track, this.localAudioStream);
+            }
+
+            this._emit('call_state_change', 'calling');
+            const offer = await this.peerConnection.createOffer();
+            await this.peerConnection.setLocalDescription(offer);
+            
+            // Send audio call offer via WebSocket signaling client
+            if (this.signalingClient && this.roomId) {
+                this.signalingClient.socket.send(JSON.stringify({
+                    type: 'audio_call_offer',
+                    offer: this.peerConnection.localDescription,
+                    roomId: this.roomId
+                }));
+            }
+        } catch (err) {
+            console.error('Failed to start audio call:', err);
+            showToast('Microphone access denied or unavailable', 'error');
+            this._emit('call_state_change', 'failed');
+        }
+    }
+
+    async acceptAudioCall(offer) {
+        try {
+            this.localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            if (!this.peerConnection) this._createPeerConnection();
+
+            for (const track of this.localAudioStream.getTracks()) {
+                this.peerConnection.addTrack(track, this.localAudioStream);
+            }
+
+            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await this.peerConnection.createAnswer();
+            await this.peerConnection.setLocalDescription(answer);
+
+            if (this.signalingClient && this.roomId) {
+                this.signalingClient.socket.send(JSON.stringify({
+                    type: 'audio_call_answer',
+                    answer: this.peerConnection.localDescription,
+                    roomId: this.roomId
+                }));
+            }
+            this._emit('call_state_change', 'connected');
+        } catch (err) {
+            console.error('Failed to accept audio call:', err);
+            showToast('Microphone permission denied', 'error');
+        }
+    }
+
+    toggleAudioMute(isMuted) {
+        if (this.localAudioStream) {
+            this.localAudioStream.getAudioTracks().forEach(track => {
+                track.enabled = !isMuted;
+            });
+        }
+    }
+
+    endAudioCall() {
+        if (this.localAudioStream) {
+            this.localAudioStream.getTracks().forEach(track => track.stop());
+            this.localAudioStream = null;
+        }
+        if (this.remoteAudioElement) {
+            this.remoteAudioElement.srcObject = null;
+            this.remoteAudioElement.remove();
+            this.remoteAudioElement = null;
+        }
+        if (this.signalingClient && this.roomId) {
+            this.signalingClient.socket.send(JSON.stringify({
+                type: 'audio_call_end',
+                roomId: this.roomId
+            }));
+        }
+        this._emit('call_state_change', 'ended');
     }
 
     acceptTransfer(transferId) {
@@ -607,6 +789,7 @@ class WebRTCManager {
 
     closeConnection() {
         this._clearConnectionTimeout();
+        this.endAudioCall();
         if (this.dataChannel) { this.dataChannel.close(); this.dataChannel = null; }
         if (this.peerConnection) { this.peerConnection.close(); this.peerConnection = null; }
         if (this.roomId) { this.signalingClient.leaveRoom(this.roomId); this.roomId = null; }
