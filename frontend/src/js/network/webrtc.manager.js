@@ -93,6 +93,7 @@ class WebRTCManager {
             this.isHost = false;
             this.isKeySynchronized = false;
             this._emit('room_joined', roomId);
+            // Ensure peer connection is ready to listen for data channel / offer
             this._createPeerConnection();
         });
 
@@ -160,7 +161,6 @@ class WebRTCManager {
                 this._clearConnectionTimeout();
                 this._clearDisconnectGracePeriod();
             } else if (state === 'disconnected') {
-                // Give a generous 120-second grace period for mobile switching / background file picking
                 this._startDisconnectGracePeriod(120000);
             } else if (state === 'failed') {
                 this._emit('connection_state_change', 'failed');
@@ -169,19 +169,20 @@ class WebRTCManager {
 
         if (this.isHost) {
             try {
+                // Host creates the data channel
                 this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
                 this._setupDataChannel();
             } catch (err) {
                 console.error('Failed to create data channel:', err);
             }
         } else {
+            // Guest listens for the data channel created by the host
             this.peerConnection.ondatachannel = (event) => {
                 this.dataChannel = event.channel;
                 this._setupDataChannel();
             };
         }
 
-        // Extended initial connection timeout to 120 seconds (2 minutes)
         this._startConnectionTimeout(120000);
         return this.peerConnection;
     }
@@ -591,7 +592,6 @@ class WebRTCManager {
     async _handleOffer(offer) {
         if (!this.peerConnection) this._createPeerConnection();
         try {
-            if (this.peerConnection.signalingState !== 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
             await this._processQueuedIceCandidates();
             const answer = await this.peerConnection.createAnswer();
@@ -604,7 +604,6 @@ class WebRTCManager {
 
     async _handleAnswer(answer) {
         try {
-            if (this.peerConnection.signalingState === 'stable') return;
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
             await this._processQueuedIceCandidates();
         } catch (err) {
@@ -614,6 +613,7 @@ class WebRTCManager {
 
     async _handleIceCandidate(candidateData) {
         const candidate = new RTCIceCandidate(candidateData);
+        // Queue candidates safely if remote description isn't set yet to prevent connection failure
         if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
             try {
                 await this.peerConnection.addIceCandidate(candidate);
