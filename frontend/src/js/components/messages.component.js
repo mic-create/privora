@@ -108,7 +108,7 @@ export function renderMessages() {
             <div id="chat-messages-container" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-1 bg-ivory-800/40">
                 <div class="flex justify-center mb-4">
                     <div class="px-3.5 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
-                        🔒 End-to-end encrypted direct WebRTC stream.
+                        🔒 Messages are end-to-end encrypted.
                     </div>
                 </div>
                 ${renderMessagesList()}
@@ -313,19 +313,17 @@ function renderMessagesList() {
     let items = [...(rtcManager.chatMessages || [])];
     
     rtcManager.activeTransfers.forEach((t) => {
-        if (t.status !== 'completed') {
-            items.push({
-                type: 'FILE_TRANSFER_OUTGOING',
-                messageId: t.transferId,
-                localOrder: t.localOrder || 0,
-                timestamp: t.timestamp || Date.now(),
-                name: t.name,
-                size: t.size,
-                status: t.status,
-                progress: t.progress || 0,
-                direction: 'outgoing'
-            });
-        }
+        items.push({
+            type: 'FILE_TRANSFER_OUTGOING',
+            messageId: t.transferId,
+            localOrder: t.localOrder || 0,
+            timestamp: t.timestamp || Date.now(),
+            name: t.name,
+            size: t.size,
+            status: t.status,
+            progress: t.progress || 0,
+            direction: 'outgoing'
+        });
     });
 
     rtcManager.incomingTransfers.forEach((t) => {
@@ -342,7 +340,7 @@ function renderMessagesList() {
         });
     });
 
-    // Sequence sorting
+    // Chronological sequence sorting using localOrder to maintain order correctly
     items.sort((a, b) => (a.localOrder || 0) - (b.localOrder || 0));
 
     // Search filter
@@ -459,7 +457,7 @@ function refreshChatDOM(container) {
         messagesContainer.innerHTML = `
             <div class="flex justify-center mb-4">
                 <div class="px-3.5 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
-                    🔒 End-to-end encrypted direct WebRTC stream.
+                    🔒 Messages are end-to-end encrypted.
                 </div>
             </div>
             ${renderMessagesList()}
