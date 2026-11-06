@@ -35,14 +35,18 @@ function setupNavigation() {
 }
 
 function setupVisibilityHandler() {
-    // Automatically verify signaling and connection state when user returns to app after 1-2 minutes
-    document.addEventListener('visibilitychange', () => {
+    document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'visible') {
-            console.log('[PRIVORA] App returned to foreground. Verifying active connections...');
+            console.log('[PRIVORA] App returned to foreground. Syncing signaling...');
+            
+            // If socket was severed by background mobile OS, restore it and rejoin room state
             if (!rtcManager.signalingClient.isConnected) {
-                rtcManager.signalingClient.connect().catch(err => {
-                    console.warn('[PRIVORA] Signaling reconnection attempt failed:', err);
-                });
+                try {
+                    await rtcManager.signalingClient.connect();
+                    rtcManager.signalingClient.rejoinSession();
+                } catch (err) {
+                    console.warn('[PRIVORA] Background reconnection attempt failed:', err);
+                }
             }
         }
     });

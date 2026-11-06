@@ -7,6 +7,7 @@ import { checkRateLimit } from '../middleware/rateLimit.middleware.js';
 const rooms = new Map(); // roomId -> Set of WebSocket clients
 const clientRooms = new Map(); // WebSocket client -> roomId
 const clientIps = new Map(); // WebSocket client -> IP string
+const roomCleanupTimers = new Map(); // roomId -> setTimeout handle for grace period
 
 export function handleSignalingConnection(ws, req) {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -75,6 +76,13 @@ function handleCreateRoom(ws) {
     handleDisconnect(ws);
 
     const roomId = crypto.randomBytes(4).toString('hex').toUpperCase();
+    
+    // If a cleanup timer existed for this randomly generated room ID, clear it
+    if (roomCleanupTimers.has(roomId)) {
+        clearTimeout(roomCleanupTimers.get(roomId));
+        roomCleanupTimers.delete(roomId);
+    }
+
     rooms.set(roomId, new Set([ws]));
     clientRooms.set(ws, roomId);
 
@@ -93,6 +101,13 @@ function handleJoinRoom(ws, roomId) {
     if (room.size >= 2) {
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
         return;
+    }
+
+    // Cancel the room destruction grace timer since someone is joining!
+    if (roomCleanupTimers.has(upperRoomId)) {
+        clearTimeout(roomCleanupTimers.get(upperRoomId));
+        roomCleanupTimers.delete(upperRoomId);
+        logger.info('Cancelled room expiration grace timer', { roomId: upperRoomId });
     }
 
     handleDisconnect(ws);
@@ -141,9 +156,26 @@ function handleDisconnect(ws) {
             }
         }
 
+        // Instead of immediate deletion, start a 2-minute (120,000ms) grace period timer
         if (room.size === 0) {
-            rooms.delete(roomId);
-            logger.info('Room deleted due to inactivity', { roomId });
+            logger.info('Room is empty. Starting 2-minute expiration grace period', { roomId });
+            
+            if (roomCleanupTimers.has(roomId)) {
+                clearTimeout(roomCleanupTimers.get(roomId));
+            }
+
+            const timer = setTimeout(() => {
+                if (rooms.has(roomId)) {
+                    const currentRoom = rooms.get(roomId);
+                    if (currentRoom.size === 0) {
+                        rooms.delete(roomId);
+                        logger.info('Room deleted due to expiration grace period timeout', { roomId });
+                    }
+                }
+                roomCleanupTimers.delete(roomId);
+            }, 120000); // 2 minutes
+
+            roomCleanupTimers.set(roomId, timer);
         }
     }
 

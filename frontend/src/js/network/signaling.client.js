@@ -2,13 +2,14 @@ import { showToast } from '../utils/notifier.js';
 
 export class SignalingClient {
     constructor(serverUrl) {
-        // Automatically targets Render backend in production and localhost during dev
         const productionWsUrl = 'wss://privora-signaling-backend.onrender.com';
         this.serverUrl = serverUrl || (window.location.hostname === 'localhost' ? 'ws://localhost:5000' : productionWsUrl);
         this.ws = null;
         this.listeners = new Map();
         this.isConnected = false;
         this.pingInterval = null;
+        this.currentRoomId = null;
+        this.isHost = false;
     }
 
     connect() {
@@ -27,6 +28,12 @@ export class SignalingClient {
                     this.isConnected = true;
                     console.log('[Signaling] Connected successfully to WebSocket server');
                     this._startHeartbeat();
+
+                    // Re-register session if app re-opened after switching
+                    if (this.currentRoomId) {
+                        this.rejoinSession();
+                    }
+
                     resolve();
                 };
 
@@ -41,7 +48,7 @@ export class SignalingClient {
 
                 this.ws.onclose = () => {
                     this.isConnected = false;
-                    console.warn('[Signaling] Disconnected from WebSocket server');
+                    console.warn('[Signaling] Disconnected from WebSocket server. Auto-reconnecting when active...');
                     this._stopHeartbeat();
                     this._emit('disconnect');
                 };
@@ -83,9 +90,12 @@ export class SignalingClient {
 
         switch (type) {
             case 'ROOM_CREATED':
+                this.currentRoomId = payload.roomId;
+                this.isHost = true;
                 this._emit('room_created', payload.roomId);
                 break;
             case 'ROOM_JOINED':
+                this.currentRoomId = payload.roomId;
                 this._emit('room_joined', payload.roomId);
                 break;
             case 'PEER_JOINED':
@@ -126,27 +136,38 @@ export class SignalingClient {
     }
 
     createRoom() {
+        this.isHost = true;
         return this.send('CREATE_ROOM');
     }
 
     joinRoom(roomId) {
+        this.currentRoomId = roomId;
+        this.isHost = false;
         return this.send('JOIN_ROOM', { roomId });
     }
 
+    rejoinSession() {
+        if (this.currentRoomId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log(`[Signaling] Re-establishing active session for Room #${this.currentRoomId}`);
+            this.send('JOIN_ROOM', { roomId: this.currentRoomId });
+        }
+    }
+
     sendOffer(offer, roomId) {
-        return this.send('RTC_OFFER', { offer, roomId });
+        return this.send('RTC_OFFER', { offer, roomId: roomId || this.currentRoomId });
     }
 
     sendAnswer(answer, roomId) {
-        return this.send('RTC_ANSWER', { answer, roomId });
+        return this.send('RTC_ANSWER', { answer, roomId: roomId || this.currentRoomId });
     }
 
     sendIceCandidate(candidate, roomId) {
-        return this.send('ICE_CANDIDATE', { candidate, roomId });
+        return this.send('ICE_CANDIDATE', { candidate, roomId: roomId || this.currentRoomId });
     }
 
     leaveRoom(roomId) {
-        this.send('LEAVE_ROOM', { roomId });
+        this.send('LEAVE_ROOM', { roomId: roomId || this.currentRoomId });
+        this.currentRoomId = null;
     }
 
     disconnect() {
@@ -155,6 +176,7 @@ export class SignalingClient {
             this.ws = null;
         }
         this._stopHeartbeat();
+        this.currentRoomId = null;
     }
 
     _startHeartbeat() {
