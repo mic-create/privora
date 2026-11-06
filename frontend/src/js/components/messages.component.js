@@ -4,6 +4,8 @@ import { rtcManager } from '../network/webrtc.manager.js';
 
 let typingTimeout = null;
 let selectedFilesToAttach = [];
+let callTimerInterval = null;
+let callSeconds = 0;
 
 export function renderMessages() {
     const state = getState();
@@ -58,6 +60,40 @@ export function renderMessages() {
                         <span id="chat-status-dot" class="h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}"></span>
                         <span id="chat-status-text" class="text-xs font-mono text-slate-400">${isConnected ? 'Connected' : 'Disconnected'}</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Active Call Banner / Overlay -->
+            <div id="active-call-overlay" class="hidden absolute top-16 left-4 right-4 bg-navy-800/95 border border-accent-500/50 rounded-2xl p-4 shadow-2xl flex items-center justify-between z-30 backdrop-blur-md animate-fade-in">
+                <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-full bg-accent-500/20 border border-accent-500/40 flex items-center justify-center text-accent-400 animate-pulse">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+                    </div>
+                    <div>
+                        <h5 class="text-xs font-semibold text-white" id="call-status-title">Secure Audio Call</h5>
+                        <p class="text-[10px] text-accent-400 font-mono" id="call-timer-display">Connecting...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-toggle-mute" class="px-3 py-1.5 bg-navy-950 hover:bg-navy-900 text-slate-300 border border-navy-700 rounded-xl text-xs font-medium">Mute</button>
+                    <button id="btn-end-call" class="px-3 py-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-xl text-xs font-medium">End Call</button>
+                </div>
+            </div>
+
+            <!-- Incoming Call Modal Banner -->
+            <div id="incoming-call-banner" class="hidden absolute bottom-20 left-6 right-6 bg-navy-800 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex items-center justify-between z-20 animate-fade-in">
+                <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 animate-bounce">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+                    </div>
+                    <div>
+                        <h5 class="text-xs font-semibold text-white">Incoming Secure Audio Call</h5>
+                        <p class="text-[10px] text-slate-400 font-mono">Peer is requesting an encrypted voice call</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-decline-call" class="px-3 py-1.5 bg-navy-950 hover:bg-navy-900 text-slate-300 border border-navy-700 rounded-xl text-xs font-medium">Decline</button>
+                    <button id="btn-accept-call" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium">Accept</button>
                 </div>
             </div>
 
@@ -129,6 +165,20 @@ export function renderMessages() {
     const previewContainer = container.querySelector('#attachment-preview-container');
     const previewFileName = container.querySelector('#preview-file-name');
     const removeAttachmentBtn = container.querySelector('#btn-remove-attachment');
+    
+    // Call UI Elements
+    const startCallBtn = container.querySelector('#btn-start-call');
+    const activeCallOverlay = container.querySelector('#active-call-overlay');
+    const callStatusTitle = container.querySelector('#call-status-title');
+    const callTimerDisplay = container.querySelector('#call-timer-display');
+    const muteCallBtn = container.querySelector('#btn-toggle-mute');
+    const endCallBtn = container.querySelector('#btn-end-call');
+    
+    const incomingCallBanner = container.querySelector('#incoming-call-banner');
+    const acceptCallBtn = container.querySelector('#btn-accept-call');
+    const declineCallBtn = container.querySelector('#btn-decline-call');
+
+    // File transfer UI elements
     const incomingBanner = container.querySelector('#incoming-transfer-banner');
     const incomingFileName = container.querySelector('#incoming-file-name');
     const incomingFileMeta = container.querySelector('#incoming-file-meta');
@@ -136,6 +186,81 @@ export function renderMessages() {
     const declineFileBtn = container.querySelector('#btn-decline-file');
 
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    // Call Action Listeners
+    startCallBtn.addEventListener('click', () => {
+        activeCallOverlay.classList.remove('hidden');
+        callStatusTitle.textContent = 'Calling Peer...';
+        callTimerDisplay.textContent = 'Ringing...';
+        rtcManager.startAudioCall();
+    });
+
+    let isMuted = false;
+    muteCallBtn.addEventListener('click', () => {
+        isMuted = !isMuted;
+        rtcManager.toggleAudioMute(isMuted);
+        muteCallBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+        muteCallBtn.classList.toggle('bg-accent-600/30', isMuted);
+    });
+
+    endCallBtn.addEventListener('click', () => {
+        rtcManager.endAudioCall();
+        activeCallOverlay.classList.add('hidden');
+        stopCallTimer();
+        showToast('Audio call ended', 'info');
+    });
+
+    acceptCallBtn.addEventListener('click', () => {
+        incomingCallBanner.classList.add('hidden');
+        activeCallOverlay.classList.remove('hidden');
+        callStatusTitle.textContent = 'Connected';
+        startCallTimer();
+        if (window.pendingCallOffer) {
+            rtcManager.acceptAudioCall(window.pendingCallOffer);
+            window.pendingCallOffer = null;
+        }
+    });
+
+    declineCallBtn.addEventListener('click', () => {
+        incomingCallBanner.classList.add('hidden');
+        window.pendingCallOffer = null;
+        rtcManager.endAudioCall();
+        showToast('Call declined', 'error');
+    });
+
+    rtcManager.on('incoming_audio_call', (offer) => {
+        window.pendingCallOffer = offer;
+        incomingCallBanner.classList.remove('hidden');
+    });
+
+    rtcManager.on('call_state_change', (state) => {
+        if (state === 'connected') {
+            activeCallOverlay.classList.remove('hidden');
+            callStatusTitle.textContent = 'Live Audio Call';
+            startCallTimer();
+        } else if (state === 'ended' || state === 'failed') {
+            activeCallOverlay.classList.add('hidden');
+            stopCallTimer();
+        }
+    });
+
+    function startCallTimer() {
+        stopCallTimer();
+        callSeconds = 0;
+        callTimerInterval = setInterval(() => {
+            callSeconds++;
+            const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+            const secs = (callSeconds % 60).toString().padStart(2, '0');
+            callTimerDisplay.textContent = `${mins}:${secs}`;
+        }, 1000);
+    }
+
+    function stopCallTimer() {
+        if (callTimerInterval) {
+            clearInterval(callTimerInterval);
+            callTimerInterval = null;
+        }
+    }
 
     attachBtn.addEventListener('click', () => fileInput.click());
 
@@ -248,7 +373,6 @@ export function renderMessages() {
 function renderMessagesList() {
     let items = [...(rtcManager.chatMessages || [])];
     
-    // Include active and incoming file transfers in the message stream for unified history
     rtcManager.activeTransfers.forEach((t) => {
         items.push({
             type: 'FILE_TRANSFER_OUTGOING',
@@ -275,7 +399,6 @@ function renderMessagesList() {
         });
     });
 
-    // Sort chronologically by timestamp
     items.sort((a, b) => a.timestamp - b.timestamp);
 
     if (items.length === 0) {
