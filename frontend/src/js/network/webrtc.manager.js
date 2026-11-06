@@ -230,8 +230,18 @@ class WebRTCManager {
                                 }));
                             }
 
-                            this.chatMessages.push({ ...decrypted, direction: 'incoming', status: 'Delivered' });
-                            this._emit('chat_message_received', decrypted);
+                            const incomingRecord = {
+                                type: 'CHAT_MESSAGE',
+                                messageId: decrypted.messageId,
+                                sequence: decrypted.sequence,
+                                timestamp: decrypted.timestamp || Date.now(),
+                                text: decrypted.text,
+                                direction: 'incoming',
+                                status: 'Delivered'
+                            };
+
+                            this.chatMessages.push(incomingRecord);
+                            this._emit('chat_message_received', incomingRecord);
                         } else if (decrypted.type === 'CHAT_ACK') {
                             const found = this.chatMessages.find(m => m.messageId === decrypted.messageId);
                             if (found) {
@@ -361,14 +371,14 @@ class WebRTCManager {
             messageId,
             sequence,
             timestamp,
-            text
+            text,
+            direction: 'outgoing'
         };
 
         const encrypted = await encryptPayload(this.chatKey, chatPayload);
         const record = {
             ...chatPayload,
-            status: 'Sending',
-            direction: 'outgoing'
+            status: 'Sending'
         };
 
         this.chatMessages.push(record);
@@ -606,9 +616,37 @@ class WebRTCManager {
 
     closeConnection() {
         this._clearConnectionTimeout();
-        if (this.dataChannel) { this.dataChannel.close(); this.dataChannel = null; }
-        if (this.peerConnection) { this.peerConnection.close(); this.peerConnection = null; }
-        if (this.roomId) { this.signalingClient.leaveRoom(this.roomId); this.roomId = null; }
+
+        if (this.dataChannel) {
+            try { this.dataChannel.close(); } catch (e) {}
+            this.dataChannel = null;
+        }
+
+        if (this.peerConnection) {
+            try { this.peerConnection.close(); } catch (e) {}
+            this.peerConnection = null;
+        }
+
+        if (this.roomId) {
+            try { this.signalingClient.leaveRoom(this.roomId); } catch (e) {}
+            this.roomId = null;
+        }
+
+        // Reset cryptographic state
+        this.sessionKey = null;
+        this.sessionKeyBase64 = null;
+        this.chatKey = null;
+        this.fileKey = null;
+        this.isKeySynchronized = false;
+        this.isHost = false;
+
+        // Reset transfer and chat states
+        this.activeTransfers.clear();
+        this.incomingTransfers.clear();
+        this.chatMessages = [];
+        this.lastSeenSequence = 0;
+        this.iceCandidateQueue = [];
+
         this._emit('connection_closed');
     }
 

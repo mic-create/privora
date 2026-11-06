@@ -14,24 +14,24 @@ export function renderTransfer() {
 
     container.innerHTML = `
         <!-- Session Controls Header -->
-        <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div class="bg-white border border-border rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xs">
             <div class="flex items-center gap-4">
-                <div class="h-12 w-12 rounded-xl bg-accent-500/10 border border-accent-500/20 flex items-center justify-center text-accent-400">
+                <div class="h-12 w-12 rounded-xl bg-ivory-800 border border-sage flex items-center justify-center text-forest-800">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 </div>
                 <div>
-                    <h3 class="text-base font-semibold text-white">Peer-to-Peer Encrypted File Transfer</h3>
-                    <p class="text-xs text-slate-400 font-mono mt-0.5" id="transfer-room-status">Status: ${isDataChannelOpen ? 'DataChannel OPEN • Ready' : (state.session.isConnected ? 'Connected • Establishing DataChannel...' : 'Disconnected • Ready')}</p>
+                    <h3 class="text-base font-semibold text-charcoal">Peer-to-Peer Encrypted File Transfer</h3>
+                    <p class="text-xs text-charcoal-muted font-mono mt-0.5" id="transfer-room-status">Status: ${isDataChannelOpen ? 'DataChannel OPEN • Ready' : (state.session.isConnected ? 'Connected • Establishing DataChannel...' : 'Disconnected • Ready')}</p>
                 </div>
             </div>
             <div class="flex items-center gap-3 w-full md:w-auto flex-wrap">
-                <button id="btn-create-room" class="flex-1 md:flex-none px-4 py-2.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-xl shadow-md transition-all">
+                <button id="btn-create-room" class="flex-1 md:flex-none px-4 py-2.5 bg-forest-800 hover:bg-forest-700 text-white text-xs font-medium rounded-xl shadow-md transition-all">
                     Create Secure Room
                 </button>
-                <button id="btn-join-room-modal" class="flex-1 md:flex-none px-4 py-2.5 bg-navy-800 hover:bg-navy-700 text-slate-200 text-xs font-medium rounded-xl border border-navy-700 transition-all">
+                <button id="btn-join-room-modal" class="flex-1 md:flex-none px-4 py-2.5 bg-white hover:bg-ivory-800 text-charcoal text-xs font-medium rounded-xl border border-border transition-all shadow-2xs">
                     Join via Code
                 </button>
-                <button id="btn-leave-room" class="${state.session.isConnected ? '' : 'hidden'} px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-medium rounded-xl transition-all">
+                <button id="btn-leave-room" class="${state.session.isConnected ? '' : 'hidden'} px-4 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-700 border border-red-500/30 text-xs font-medium rounded-xl transition-all">
                     Leave Room
                 </button>
             </div>
@@ -45,33 +45,33 @@ export function renderTransfer() {
             
             <!-- Drag and Drop Dropzone & Queue (2 Cols) -->
             <div class="lg:col-span-2 space-y-6">
-                <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6">
+                <div class="bg-white border border-border rounded-2xl p-6 shadow-2xs">
                     <div class="flex items-center justify-between mb-4">
-                        <h4 class="text-sm font-semibold text-white">Selected Files & Dropzone</h4>
-                        <span id="file-counter" class="text-xs text-slate-400 font-mono">${selectedFiles.length} files selected</span>
+                        <h4 class="text-sm font-semibold text-charcoal">Selected Files & Dropzone</h4>
+                        <span id="file-counter" class="text-xs text-charcoal-muted font-mono">${selectedFiles.length} files selected</span>
                     </div>
 
                     <!-- Dropzone Target -->
-                    <div id="dropzone" class="border-2 border-dashed border-navy-700 hover:border-accent-500/60 transition-colors rounded-2xl p-8 lg:p-10 text-center bg-navy-950/40 cursor-pointer flex flex-col items-center justify-center">
-                        <div class="h-14 w-14 rounded-2xl bg-navy-800/80 border border-navy-700 flex items-center justify-center text-accent-400 mb-4 shadow-inner">
+                    <div id="dropzone" class="border-2 border-dashed border-border hover:border-forest-800 transition-colors rounded-2xl p-8 lg:p-10 text-center bg-ivory-800/40 cursor-pointer flex flex-col items-center justify-center">
+                        <div class="h-14 w-14 rounded-2xl bg-white border border-border flex items-center justify-center text-forest-800 mb-4 shadow-2xs">
                             <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                         </div>
-                        <p class="text-sm font-medium text-slate-200">Drag and drop files here, or <span class="text-accent-400 underline underline-offset-2">browse</span></p>
-                        <p class="text-xs text-slate-500 mt-1.5 font-mono">Encrypted via AES-GCM-256 with SHA-256 integrity verification</p>
+                        <p class="text-sm font-medium text-charcoal">Drag and drop files here, or <span class="text-forest-800 underline underline-offset-2">browse</span></p>
+                        <p class="text-xs text-charcoal-muted mt-1.5 font-mono">Encrypted via AES-GCM-256 with SHA-256 integrity verification</p>
                         <input type="file" id="file-input" multiple class="hidden">
                     </div>
 
                     <!-- Selected Files Queue List -->
                     <div class="mt-6">
                         <div class="flex items-center justify-between mb-3">
-                            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Transfer Queue</span>
-                            <button id="btn-clear-queue" class="text-xs text-slate-400 hover:text-red-400 transition-colors">Clear Queue</button>
+                            <span class="text-xs font-semibold uppercase tracking-wider text-charcoal-muted">Transfer Queue</span>
+                            <button id="btn-clear-queue" class="text-xs text-charcoal-muted hover:text-red-700 transition-colors">Clear Queue</button>
                         </div>
                         <div id="file-queue-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-                            ${selectedFiles.length === 0 ? `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>` : ''}
+                            ${selectedFiles.length === 0 ? `<div class="text-center py-6 text-xs text-charcoal-muted border border-border rounded-xl bg-ivory-800/20">No files queued for transfer yet.</div>` : ''}
                         </div>
                         <div class="mt-4">
-                            <button id="btn-send-files" ${selectedFiles.length === 0 || !isDataChannelOpen ? 'disabled' : ''} class="w-full py-3 bg-accent-600 hover:bg-accent-500 disabled:bg-accent-600/30 disabled:text-white/40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                            <button id="btn-send-files" ${selectedFiles.length === 0 || !isDataChannelOpen ? 'disabled' : ''} class="w-full py-3 bg-forest-800 hover:bg-forest-700 disabled:bg-forest-800/30 disabled:text-white/50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
                                 Send Files (Encrypted P2P)
                             </button>
@@ -80,10 +80,10 @@ export function renderTransfer() {
                 </div>
 
                 <!-- Active & Completed Transfers Panel -->
-                <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6">
-                    <h4 class="text-sm font-semibold text-white mb-4">Active & Completed Transfers</h4>
+                <div class="bg-white border border-border rounded-2xl p-6 shadow-2xs">
+                    <h4 class="text-sm font-semibold text-charcoal mb-4">Active & Completed Transfers</h4>
                     <div id="transfers-progress-container" class="space-y-3">
-                        <div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">
+                        <div class="text-center py-6 text-xs text-charcoal-muted border border-border rounded-xl bg-ivory-800/20">
                             No active file transfers in progress.
                         </div>
                     </div>
@@ -93,43 +93,43 @@ export function renderTransfer() {
             <!-- Transfer Sidebar / Peer Connection Details -->
             <div class="space-y-6">
                 <!-- Peer Info Card -->
-                <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6">
-                    <h4 class="text-sm font-semibold text-white mb-4">Peer Connection</h4>
+                <div class="bg-white border border-border rounded-2xl p-6 shadow-2xs">
+                    <h4 class="text-sm font-semibold text-charcoal mb-4">Peer Connection</h4>
                     <div class="space-y-3 font-mono text-xs">
-                        <div class="flex justify-between py-2 border-b border-navy-800">
-                            <span class="text-slate-400">Room ID:</span>
-                            <span id="info-room-id" class="text-accent-400 font-semibold">${state.session.roomId || 'None'}</span>
+                        <div class="flex justify-between py-2 border-b border-border">
+                            <span class="text-charcoal-muted">Room ID:</span>
+                            <span id="info-room-id" class="text-forest-800 font-semibold">${state.session.roomId || 'None'}</span>
                         </div>
-                        <div class="flex justify-between py-2 border-b border-navy-800">
-                            <span class="text-slate-400">Connection State:</span>
-                            <span id="peer-state" class="text-amber-400 font-semibold">${state.session.isConnected ? 'Connected' : 'Not Connected'}</span>
+                        <div class="flex justify-between py-2 border-b border-border">
+                            <span class="text-charcoal-muted">Connection State:</span>
+                            <span id="peer-state" class="text-brown-800 font-semibold">${state.session.isConnected ? 'Connected' : 'Not Connected'}</span>
                         </div>
-                        <div class="flex justify-between py-2 border-b border-navy-800">
-                            <span class="text-slate-400">DataChannel:</span>
-                            <span id="datachannel-state" class="${isDataChannelOpen ? 'text-emerald-400 font-semibold' : 'text-slate-400'}">${isDataChannelOpen ? 'Open (Active)' : 'Standby'}</span>
+                        <div class="flex justify-between py-2 border-b border-border">
+                            <span class="text-charcoal-muted">DataChannel:</span>
+                            <span id="datachannel-state" class="${isDataChannelOpen ? 'text-forest-800 font-semibold' : 'text-charcoal-muted'}">${isDataChannelOpen ? 'Open (Active)' : 'Standby'}</span>
                         </div>
                         <div class="flex justify-between py-2">
-                            <span class="text-slate-400">Encryption:</span>
-                            <span class="text-emerald-400">AES-GCM-256</span>
+                            <span class="text-charcoal-muted">Encryption:</span>
+                            <span class="text-forest-800">AES-GCM-256</span>
                         </div>
                     </div>
                     <div class="mt-5 space-y-2">
-                        <button id="btn-copy-link" class="w-full py-2.5 bg-navy-800 hover:bg-navy-700 text-slate-200 border border-navy-700 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-2">
-                            <svg class="w-4 h-4 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                        <button id="btn-copy-link" class="w-full py-2.5 bg-white hover:bg-ivory-800 text-charcoal border border-border rounded-xl text-xs font-medium transition-all shadow-2xs flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4 text-forest-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
                             Copy Invitation Link
                         </button>
                     </div>
                 </div>
 
                 <!-- Security & Notice Card -->
-                <div class="bg-navy-900/80 border border-navy-700/60 rounded-2xl p-6">
+                <div class="bg-white border border-border rounded-2xl p-6 shadow-2xs">
                     <div class="flex items-center gap-3 mb-3">
-                        <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <div class="h-8 w-8 rounded-lg bg-ivory-800 border border-sage flex items-center justify-center text-forest-800">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                         </div>
-                        <h4 class="text-sm font-semibold text-white">Mobile P2P Synced</h4>
+                        <h4 class="text-sm font-semibold text-charcoal">Mobile P2P Synced</h4>
                     </div>
-                    <p class="text-xs text-slate-400 leading-relaxed">
+                    <p class="text-xs text-charcoal-muted leading-relaxed">
                         DataChannel is now explicitly required to reach the OPEN state before enabling file transmission buttons across mobile browsers.
                     </p>
                 </div>
@@ -208,11 +208,11 @@ export function renderTransfer() {
     const fileInput = container.querySelector('#file-input');
 
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-accent-500', 'bg-accent-500/5'); });
-    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('border-accent-500', 'bg-accent-500/5'); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-forest-800', 'bg-ivory-700/50'); });
+    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('border-forest-800', 'bg-ivory-700/50'); });
     dropzone.addEventListener('drop', (e) => {
         e.preventDefault();
-        dropzone.classList.remove('border-accent-500', 'bg-accent-500/5');
+        dropzone.classList.remove('border-forest-800', 'bg-ivory-700/50');
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             selectedFiles = [...selectedFiles, ...Array.from(e.dataTransfer.files)];
             renderQueueDOM(container);
@@ -257,20 +257,20 @@ function renderQueueDOM(container) {
     if (!queueList) return;
 
     if (selectedFiles.length === 0) {
-        queueList.innerHTML = `<div class="text-center py-6 text-xs text-slate-500 border border-navy-800 rounded-xl bg-navy-950/20">No files queued for transfer yet.</div>`;
+        queueList.innerHTML = `<div class="text-center py-6 text-xs text-charcoal-muted border border-border rounded-xl bg-ivory-800/20">No files queued for transfer yet.</div>`;
         return;
     }
 
     queueList.innerHTML = selectedFiles.map((file, idx) => `
-        <div class="flex items-center justify-between p-3 bg-navy-950/60 border border-navy-800 rounded-xl">
+        <div class="flex items-center justify-between p-3 bg-ivory-800/60 border border-border rounded-xl">
             <div class="flex items-center gap-3 overflow-hidden">
-                <div class="h-8 w-8 rounded-lg bg-navy-800 flex items-center justify-center text-accent-400 flex-shrink-0 font-mono text-[10px]">FILE</div>
+                <div class="h-8 w-8 rounded-lg bg-white border border-border flex items-center justify-center text-forest-800 flex-shrink-0 font-mono text-[10px]">FILE</div>
                 <div class="overflow-hidden">
-                    <p class="text-xs font-medium text-slate-200 truncate">${file.name}</p>
-                    <p class="text-[10px] text-slate-400 font-mono">${(file.size / (1024 * 1024)).toFixed(2)} MB • Ready</p>
+                    <p class="text-xs font-medium text-charcoal truncate">${file.name}</p>
+                    <p class="text-[10px] text-charcoal-muted font-mono">${(file.size / (1024 * 1024)).toFixed(2)} MB • Ready</p>
                 </div>
             </div>
-            <button data-index="${idx}" class="remove-queue-item text-slate-500 hover:text-red-400 p-1">
+            <button data-index="${idx}" class="remove-queue-item text-charcoal-muted hover:text-red-700 p-1">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
         </div>
@@ -291,19 +291,19 @@ function renderIncomingBanners(container) {
     if (!bannerContainer) return;
 
     bannerContainer.innerHTML = pendingIncomingTransfers.map(meta => `
-        <div class="bg-navy-900 border border-accent-500/50 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fade-in">
+        <div class="bg-white border border-sage rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fade-in">
             <div class="flex items-center gap-3">
-                <div class="h-10 w-10 rounded-xl bg-accent-500/10 border border-accent-500/30 flex items-center justify-center text-accent-400 font-mono text-xs">IN</div>
+                <div class="h-10 w-10 rounded-xl bg-ivory-800 border border-sage flex items-center justify-center text-forest-800 font-mono text-xs">IN</div>
                 <div>
-                    <p class="text-xs font-semibold text-white">Incoming Encrypted File Transfer</p>
-                    <p class="text-xs text-slate-300 font-medium mt-0.5">${meta.name} <span class="text-slate-400 font-mono">(${(meta.size / (1024 * 1024)).toFixed(2)} MB)</span></p>
+                    <p class="text-xs font-semibold text-charcoal">Incoming Encrypted File Transfer</p>
+                    <p class="text-xs text-charcoal font-medium mt-0.5">${meta.name} <span class="text-charcoal-muted font-mono">(${(meta.size / (1024 * 1024)).toFixed(2)} MB)</span></p>
                 </div>
             </div>
             <div class="flex items-center gap-2 w-full md:w-auto">
-                <button data-id="${meta.transferId}" class="accept-transfer-btn flex-1 md:flex-none px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-xl transition-all">
+                <button data-id="${meta.transferId}" class="accept-transfer-btn flex-1 md:flex-none px-4 py-2 bg-forest-800 hover:bg-forest-700 text-white text-xs font-medium rounded-xl transition-all">
                     Accept & Download
                 </button>
-                <button data-id="${meta.transferId}" class="decline-transfer-btn flex-1 md:flex-none px-4 py-2 bg-navy-800 hover:bg-navy-700 text-slate-300 text-xs font-medium rounded-xl border border-navy-700 transition-all">
+                <button data-id="${meta.transferId}" class="decline-transfer-btn flex-1 md:flex-none px-4 py-2 bg-white hover:bg-ivory-800 text-charcoal text-xs font-medium rounded-xl border border-border transition-all">
                     Decline
                 </button>
             </div>
@@ -343,7 +343,7 @@ function upsertTransferRecord(container, transfer) {
     if (!itemEl) {
         itemEl = document.createElement('div');
         itemEl.dataset.transferId = transfer.transferId;
-        itemEl.className = 'p-4 bg-navy-950/60 border border-navy-800 rounded-xl space-y-3 animate-fade-in';
+        itemEl.className = 'p-4 bg-ivory-800/60 border border-border rounded-xl space-y-3 animate-fade-in';
         progressContainer.appendChild(itemEl);
     }
 
@@ -353,26 +353,26 @@ function upsertTransferRecord(container, transfer) {
     let actionButtonHtml = '';
     if (isCompleted && transfer.blob) {
         const url = URL.createObjectURL(transfer.blob);
-        actionButtonHtml = `<a href="${url}" download="${transfer.name}" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-all shadow-md">Save File</a>`;
+        actionButtonHtml = `<a href="${url}" download="${transfer.name}" class="px-3 py-1.5 bg-forest-800 hover:bg-forest-700 text-white text-xs font-medium rounded-lg transition-all shadow-2xs">Save File</a>`;
     } else {
-        actionButtonHtml = `<button data-id="${transfer.transferId}" class="cancel-transfer-btn text-xs text-red-400 hover:text-red-300">Cancel</button>`;
+        actionButtonHtml = `<button data-id="${transfer.transferId}" class="cancel-transfer-btn text-xs text-red-700 hover:text-red-800">Cancel</button>`;
     }
 
     itemEl.innerHTML = `
         <div class="flex items-center justify-between">
             <div class="flex items-center gap-3 overflow-hidden">
-                <div class="h-8 w-8 rounded-lg bg-navy-800 flex items-center justify-center text-accent-400 flex-shrink-0 font-mono text-[10px]">
+                <div class="h-8 w-8 rounded-lg bg-white border border-border flex items-center justify-center text-forest-800 flex-shrink-0 font-mono text-[10px]">
                     ${isCompleted ? '✓' : 'TR'}
                 </div>
                 <div class="overflow-hidden">
-                    <p class="text-xs font-medium text-slate-200 truncate">${transfer.name}</p>
-                    <p class="text-[10px] text-slate-400 font-mono uppercase">${transfer.status} • ${progressVal}%</p>
+                    <p class="text-xs font-medium text-charcoal truncate">${transfer.name}</p>
+                    <p class="text-[10px] text-charcoal-muted font-mono uppercase">${transfer.status} • ${progressVal}%</p>
                 </div>
             </div>
             <div>${actionButtonHtml}</div>
         </div>
-        <div class="w-full bg-navy-900 rounded-full h-1.5 overflow-hidden border border-navy-800">
-            <div class="bg-accent-500 h-full transition-all duration-200" style="width: ${progressVal}%"></div>
+        <div class="w-full bg-ivory-900 rounded-full h-1.5 overflow-hidden border border-border">
+            <div class="bg-forest-800 h-full transition-all duration-200" style="width: ${progressVal}%"></div>
         </div>
     `;
 
@@ -401,11 +401,11 @@ function refreshUIState() {
     if (roomEl) roomEl.textContent = state.session.roomId || 'None';
     if (peerEl) {
         peerEl.textContent = state.session.isConnected ? 'Connected' : 'Not Connected';
-        peerEl.className = state.session.isConnected ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold';
+        peerEl.className = state.session.isConnected ? 'text-forest-800 font-semibold' : 'text-brown-800 font-semibold';
     }
     if (dcEl) {
         dcEl.textContent = isOpen ? 'Open (Active)' : 'Standby';
-        dcEl.className = isOpen ? 'text-emerald-400 font-semibold' : 'text-slate-400';
+        dcEl.className = isOpen ? 'text-forest-800 font-semibold' : 'text-charcoal-muted';
     }
     if (leaveBtn) {
         if (state.session.isConnected) leaveBtn.classList.remove('hidden');

@@ -61,15 +61,15 @@ function handleRoute() {
         container.appendChild(renderActivity());
     } else if (hash === 'settings' || hash === 'privacy') {
         const settingsContainer = document.createElement('div');
-        settingsContainer.className = 'p-6 bg-navy-900/80 border border-navy-700/60 rounded-2xl text-slate-200';
+        settingsContainer.className = 'p-6 bg-white border border-slate-200 rounded-2xl text-slate-800 shadow-xs';
         renderSettings(settingsContainer);
         container.appendChild(settingsContainer);
     } else {
         container.innerHTML = `
-            <div class="p-8 text-center text-slate-400">
-                <h3 class="text-sm font-semibold text-white mb-1">Page Not Found</h3>
+            <div class="p-8 text-center text-slate-500">
+                <h3 class="text-sm font-semibold text-slate-900 mb-1">Page Not Found</h3>
                 <p class="text-xs">The requested view '${hash}' does not exist.</p>
-                <a href="#dashboard" class="inline-block mt-4 px-4 py-2 bg-accent-600 text-white text-xs rounded-xl">Return to Dashboard</a>
+                <a href="#dashboard" class="inline-block mt-4 px-4 py-2 bg-accent-600 text-white text-xs rounded-xl shadow-md">Return to Dashboard</a>
             </div>
         `;
     }
@@ -81,7 +81,7 @@ function setupSessionListeners() {
         if (statusBadge) {
             const isConnected = state.session.isConnected;
             statusBadge.textContent = isConnected ? 'Active' : 'Standby';
-            statusBadge.className = `text-[10px] font-mono ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`;
+            statusBadge.className = `text-[10px] font-mono ${isConnected ? 'text-emerald-600' : 'text-amber-600'}`;
         }
     });
 }

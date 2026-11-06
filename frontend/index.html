@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en" class="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,23 +12,31 @@
             theme: {
                 extend: {
                     colors: {
-                        navy: {
-                            950: '#060913',
-                            900: '#0B0F19',
-                            850: '#101524',
-                            800: '#161D31',
-                            700: '#1E2942',
+                        forest: {
+                            900: '#19382B',
+                            800: '#244C3A',
+                            700: '#2E5E48',
+                        },
+                        brown: {
+                            900: '#59402F',
+                            800: '#76513B',
+                            700: '#8E6349',
+                        },
+                        ivory: {
+                            900: '#EAE4D5',
+                            800: '#F5F1E8',
+                            700: '#FAF8F3',
+                        },
+                        sage: {
+                            DEFAULT: '#A8B5A0',
+                            light: '#C5CEC1',
                         },
                         charcoal: {
-                            900: '#111318',
-                            800: '#1A1D24',
-                            700: '#262A33',
-                            600: '#3D4452',
+                            DEFAULT: '#292D29',
+                            muted: '#747B72',
                         },
-                        accent: {
-                            500: '#3B82F6',
-                            600: '#2563EB',
-                            400: '#60A5FA',
+                        border: {
+                            DEFAULT: '#E6E5DC'
                         }
                     },
                     fontFamily: {
@@ -44,116 +52,115 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./src/css/output.css">
 </head>
-<body class="bg-navy-950 text-slate-100 font-sans antialiased selection:bg-accent-500 selection:text-white min-h-screen flex flex-col overflow-x-hidden">
+<body class="bg-ivory-800 text-charcoal font-sans antialiased selection:bg-forest-800 selection:text-white min-h-screen flex flex-col overflow-x-hidden">
 
     <!-- Toast Notification Container -->
     <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-3 pointer-events-none"></div>
 
     <!-- Modal Root Container -->
-    <div id="modal-container" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/70 backdrop-blur-sm transition-all duration-200"></div>
+    <div id="modal-container" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-charcoal/40 backdrop-blur-xs transition-all duration-200"></div>
 
     <!-- Main App Shell -->
     <div class="flex h-screen w-screen overflow-hidden">
         
         <!-- Mobile Sidebar Overlay -->
-        <div id="sidebar-overlay" class="fixed inset-0 z-30 bg-black/60 backdrop-blur-xs hidden md:hidden"></div>
+        <div id="sidebar-overlay" class="fixed inset-0 z-30 bg-charcoal/40 backdrop-blur-xs hidden md:hidden"></div>
 
         <!-- Sidebar Navigation -->
-        <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-72 bg-navy-900 border-r border-navy-700 flex flex-col justify-between transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out">
+        <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-72 bg-white border-r border-border flex flex-col justify-between transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out shadow-sm md:shadow-none">
             
             <!-- Sidebar Header & Branding -->
-            <div class="p-6 border-b border-navy-700/60 flex items-center justify-between">
+            <div class="p-6 border-b border-border flex items-center justify-between bg-ivory-700/50">
                 <div class="flex items-center gap-3">
-                    <div class="h-9 w-9 rounded-xl bg-gradient-to-br from-accent-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-accent-500/20 ring-1 ring-white/20">
+                    <div class="h-10 w-10 rounded-xl bg-forest-800 flex items-center justify-center shadow-md shadow-forest-800/25 text-white">
                         <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                     </div>
                     <div>
-                        <span class="font-bold tracking-wider text-lg text-white">PRIVORA</span>
-                        <span class="block text-[10px] text-accent-400 font-mono tracking-widest uppercase">E2EE Protocol</span>
+                        <span class="font-bold tracking-wider text-lg text-charcoal">PRIVORA</span>
+                        <span class="block text-[10px] text-brown-800 font-mono tracking-widest uppercase font-semibold">E2EE Protocol</span>
                     </div>
                 </div>
-                <button id="sidebar-close" class="md:hidden text-slate-400 hover:text-white p-1 rounded-lg">
+                <button id="sidebar-close" class="md:hidden text-charcoal-muted hover:text-charcoal p-1 rounded-lg transition-colors">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
 
             <!-- Navigation Links -->
-            <nav class="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
-                <a href="#dashboard" data-route="dashboard" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-slate-400 hover:text-slate-100 hover:bg-navy-800">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-16zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-16z"/></svg>
+            <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto">
+                <a href="#dashboard" data-route="dashboard" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all text-charcoal-muted hover:text-charcoal hover:bg-ivory-700">
+                    <svg class="w-5 h-5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-16zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-16z"/></svg>
                     Dashboard
                 </a>
-                <a href="#transfer" data-route="transfer" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-slate-400 hover:text-slate-100 hover:bg-navy-800">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                <a href="#transfer" data-route="transfer" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all text-charcoal-muted hover:text-charcoal hover:bg-ivory-700">
+                    <svg class="w-5 h-5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                     File Transfer
                 </a>
-                <a href="#messages" data-route="messages" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-slate-400 hover:text-slate-100 hover:bg-navy-800">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                <a href="#messages" data-route="messages" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all text-charcoal-muted hover:text-charcoal hover:bg-ivory-700">
+                    <svg class="w-5 h-5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                     Messages
                 </a>
-                <a href="#activity" data-route="activity" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-slate-400 hover:text-slate-100 hover:bg-navy-800">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <a href="#activity" data-route="activity" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all text-charcoal-muted hover:text-charcoal hover:bg-ivory-700">
+                    <svg class="w-5 h-5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     Recent Activity
                 </a>
-                <div class="pt-4 pb-2">
-                    <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Security & System</p>
+                <div class="pt-5 pb-2">
+                    <p class="px-3.5 text-[11px] font-semibold uppercase tracking-wider text-charcoal-muted">Security & System</p>
                 </div>
-                <a href="#settings" data-route="settings" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-slate-400 hover:text-slate-100 hover:bg-navy-800">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <a href="#settings" data-route="settings" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all text-charcoal-muted hover:text-charcoal hover:bg-ivory-700">
+                    <svg class="w-5 h-5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                     Settings
                 </a>
-                <a href="#privacy" data-route="privacy" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-slate-400 hover:text-slate-100 hover:bg-navy-800">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                <a href="#privacy" data-route="privacy" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all text-charcoal-muted hover:text-charcoal hover:bg-ivory-700">
+                    <svg class="w-5 h-5 text-charcoal-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                     Privacy & Security
                 </a>
             </nav>
 
             <!-- Sidebar Footer / Profile & Node Status -->
-            <div class="p-4 border-t border-navy-700/60">
-                <div class="bg-navy-800/80 rounded-xl p-3 border border-navy-700/60 flex items-center justify-between">
+            <div class="p-4 border-t border-border">
+                <div class="bg-ivory-800 rounded-xl p-3 border border-border flex items-center justify-between">
                     <div class="flex items-center gap-3">
                         <div class="relative">
-                            <div class="h-9 w-9 rounded-full bg-navy-700 flex items-center justify-center font-mono text-xs text-slate-300 font-semibold border border-navy-600">PR</div>
-                            <span id="global-status-dot" class="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-navy-900"></span>
+                            <div class="h-9 w-9 rounded-full bg-ivory-900 flex items-center justify-center font-mono text-xs text-charcoal font-semibold border border-sage">PR</div>
+                            <span id="global-status-dot" class="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-forest-800 ring-2 ring-white"></span>
                         </div>
                         <div class="overflow-hidden">
-                            <p class="text-xs font-medium text-slate-200 truncate">Peer Node #8492</p>
-                            <p id="global-status-text" class="text-[10px] text-emerald-400 font-mono">Ready • P2P Direct</p>
+                            <p class="text-xs font-semibold text-charcoal truncate">Peer Node #8492</p>
+                            <p id="global-status-text" class="text-[10px] text-forest-800 font-mono font-medium">Ready • P2P Direct</p>
                         </div>
                     </div>
-                    <button id="theme-toggle" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-navy-700 transition-colors" title="Toggle Theme">
-                        <svg class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-                        <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                    <button id="theme-toggle" class="p-2 text-charcoal-muted hover:text-charcoal rounded-lg hover:bg-ivory-900 transition-colors" title="Toggle Theme">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
                     </button>
                 </div>
             </div>
         </aside>
 
         <!-- Main Content Area -->
-        <div class="flex-1 flex flex-col min-w-0 bg-navy-950">
+        <div class="flex-1 flex flex-col min-w-0 bg-ivory-800">
             
             <!-- Top Navigation Bar (Mobile & Header Actions) -->
-            <header class="h-16 border-b border-navy-700/60 bg-navy-900/50 backdrop-blur-md px-6 flex items-center justify-between z-20">
+            <header class="h-16 border-b border-border bg-white/85 backdrop-blur-md px-6 flex items-center justify-between z-20 shadow-2xs">
                 <div class="flex items-center gap-4">
-                    <button id="sidebar-toggle" class="md:hidden text-slate-400 hover:text-white p-2 rounded-lg bg-navy-800 border border-navy-700">
+                    <button id="sidebar-toggle" class="md:hidden text-charcoal hover:text-forest-800 p-2 rounded-lg bg-ivory-800 border border-border focus:outline-none">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     </button>
                     <div>
-                        <h1 id="page-title" class="text-sm font-semibold text-slate-100 tracking-tight">Dashboard</h1>
-                        <p id="page-subtitle" class="text-xs text-slate-400 hidden sm:block">Overview of your secure sessions and encrypted data streams</p>
+                        <h1 id="page-title" class="text-sm font-semibold text-charcoal tracking-tight">Dashboard</h1>
+                        <p id="page-subtitle" class="text-xs text-charcoal-muted hidden sm:block">Overview of your secure sessions and encrypted data streams</p>
                     </div>
                 </div>
 
                 <!-- Quick Header Actions -->
                 <div class="flex items-center gap-3">
-                    <button id="btn-quick-join" class="px-3 py-1.5 text-xs font-medium text-slate-300 bg-navy-800 hover:bg-navy-700 border border-navy-700 rounded-lg transition-all flex items-center gap-2">
-                        <svg class="w-3.5 h-3.5 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                    <a href="#transfer" id="btn-quick-join" class="px-3.5 py-1.5 text-xs font-medium text-charcoal bg-white hover:bg-ivory-700 border border-border rounded-lg transition-all shadow-2xs flex items-center gap-2">
+                        <svg class="w-3.5 h-3.5 text-forest-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
                         Join Room
-                    </button>
-                    <button id="btn-quick-start" class="px-3.5 py-1.5 text-xs font-medium text-white bg-accent-600 hover:bg-accent-500 rounded-lg transition-all shadow-md shadow-accent-600/20 flex items-center gap-2">
+                    </a>
+                    <a href="#transfer" id="btn-quick-start" class="px-3.5 py-1.5 text-xs font-medium text-white bg-forest-800 hover:bg-forest-700 rounded-lg transition-all shadow-md shadow-forest-800/20 flex items-center gap-2">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         New Session
-                    </button>
+                    </a>
                 </div>
             </header>
 
@@ -166,5 +173,35 @@
 
     <!-- Application Script Entry -->
     <script type="module" src="./src/js/app.js"></script>
+
+    <!-- Mobile Sidebar Toggle Helper Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebar = document.getElementById('sidebar');
+            const sidebarOverlay = document.getElementById('sidebar-overlay');
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+            const sidebarClose = document.getElementById('sidebar-close');
+
+            function openSidebar() {
+                if (sidebar && sidebarOverlay) {
+                    sidebar.classList.remove('-translate-x-full');
+                    sidebarOverlay.classList.add('flex');
+                    sidebarOverlay.classList.remove('hidden');
+                }
+            }
+
+            function closeSidebar() {
+                if (sidebar && sidebarOverlay) {
+                    sidebar.classList.add('-translate-x-full');
+                    sidebarOverlay.classList.remove('flex');
+                    sidebarOverlay.classList.add('hidden');
+                }
+            }
+
+            sidebarToggle?.addEventListener('click', openSidebar);
+            sidebarClose?.addEventListener('click', closeSidebar);
+            sidebarOverlay?.addEventListener('click', closeSidebar);
+        });
+    </script>
 </body>
 </html>
