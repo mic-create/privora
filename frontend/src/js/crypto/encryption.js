@@ -86,7 +86,8 @@ export async function decryptPayload(key, ivArray, ciphertextArray) {
         const decoder = new TextDecoder();
         return JSON.parse(decoder.decode(decrypted));
     } catch (err) {
-        throw new Error('AUTHENTICATION_TAG_FAILED: AES-GCM authentication check failed');
+        console.error('[Crypto Diagnostic] AES-GCM Decryption Exception:', err.name, err.message);
+        throw new Error('AUTHENTICATION_TAG_FAILED: AES-GCM tag verification failed (Key mismatch or packet corruption)');
     }
 }
 

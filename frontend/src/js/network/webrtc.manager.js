@@ -12,11 +12,12 @@ class WebRTCManager {
         this.iceCandidateQueue = [];
         this.connectionTimeout = null;
         
-        // Cryptographic and Subkeys
+        // Cryptographic and Subkeys with Synchronization State
         this.sessionKey = null;
         this.sessionKeyBase64 = null;
         this.chatKey = null;
         this.fileKey = null;
+        this.isKeySynchronized = false;
 
         // Transfer & Chat State
         this.activeTransfers = new Map();
@@ -69,11 +70,12 @@ class WebRTCManager {
         }
     }
 
-    async _initSubkeys(masterKey) {
+    async _initSubkeys(masterKey, isSynced = true) {
         this.sessionKey = masterKey;
         this.chatKey = await deriveSubkey(masterKey, 'privora-salt-v1', 'privora-chat-encryption');
         this.fileKey = await deriveSubkey(masterKey, 'privora-salt-v1', 'privora-file-encryption');
-        console.log('[Crypto] HKDF subkeys successfully derived for chat and files');
+        this.isKeySynchronized = isSynced;
+        console.log('[Crypto Diagnostic] HKDF subkeys derived successfully. Synchronized:', isSynced);
     }
 
     _setupSignalingListeners() {
@@ -81,7 +83,7 @@ class WebRTCManager {
             this.roomId = roomId;
             this.isHost = true;
             const keys = await generateSessionKeys();
-            await this._initSubkeys(keys.key);
+            await this._initSubkeys(keys.key, true); // Host keys are authoritative
             this.sessionKeyBase64 = keys.rawBase64;
             this._emit('room_created', roomId);
         });
@@ -89,11 +91,8 @@ class WebRTCManager {
         this.signalingClient.on('room_joined', async (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
-            if (!this.sessionKey) {
-                const keys = await generateSessionKeys();
-                await this._initSubkeys(keys.key);
-                this.sessionKeyBase64 = keys.rawBase64;
-            }
+            // Joining peer starts un-synchronized until KEY_EXCHANGE arrives from host
+            this.isKeySynchronized = false;
             this._emit('room_joined', roomId);
             this._createPeerConnection();
         });
@@ -186,7 +185,8 @@ class WebRTCManager {
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
 
-            if (this.sessionKeyBase64) {
+            // If host, transmit session key immediately upon channel open
+            if (this.isHost && this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
         };
@@ -210,12 +210,12 @@ class WebRTCManager {
                 const msg = JSON.parse(data);
                 if (msg.type === 'KEY_EXCHANGE') {
                     const masterKey = await importSessionKey(msg.key);
-                    await this._initSubkeys(masterKey);
-                    console.log('[Crypto] Master session key imported and subkeys derived successfully');
+                    await this._initSubkeys(masterKey, true); // Mark keys fully synchronized
+                    showToast('Encryption keys synchronized securely', 'success');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
-                    if (!this.chatKey) {
-                        console.warn('Received chat message before chatKey was initialized.');
-                        showToast('Session key not yet synchronized', 'error');
+                    if (!this.isKeySynchronized || !this.chatKey) {
+                        console.warn('[Crypto Warning] Received chat message before key synchronization completed.');
+                        showToast('Waiting for key synchronization...', 'info');
                         return;
                     }
                     try {
@@ -244,8 +244,8 @@ class WebRTCManager {
                             console.warn('Unknown decrypted packet subtype:', decrypted.type);
                         }
                     } catch (decErr) {
-                        console.error('AES-GCM Authentication failed:', decErr);
-                        showToast('Encrypted message failed authentication tag verification', 'error');
+                        console.error('[Crypto Error] Decryption/Authentication failure:', decErr.message);
+                        showToast('Encrypted message failed tag authentication verification', 'error');
                     }
                 } else if (msg.type === 'TYPING_INDICATOR') {
                     this._emit('peer_typing', msg.isTyping);
@@ -344,10 +344,9 @@ class WebRTCManager {
     }
 
     async sendChatMessage(text) {
-        if (!this.chatKey) {
-            const keys = await generateSessionKeys();
-            await this._initSubkeys(keys.key);
-            this.sessionKeyBase64 = keys.rawBase64;
+        if (!this.isKeySynchronized || !this.chatKey) {
+            showToast('Encryption keys are still synchronizing. Please wait a moment.', 'error');
+            throw new Error('Key synchronization incomplete');
         }
 
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
@@ -401,13 +400,9 @@ class WebRTCManager {
     }
 
     async sendFiles(files) {
-        if (!this.fileKey) {
-            const keys = await generateSessionKeys();
-            await this._initSubkeys(keys.key);
-            this.sessionKeyBase64 = keys.rawBase64;
-            if (this.dataChannel && this.dataChannel.readyState === 'open') {
-                this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
-            }
+        if (!this.isKeySynchronized || !this.fileKey) {
+            showToast('Encryption keys are still synchronizing.', 'error');
+            return;
         }
 
         const CHUNK_SIZE = 16 * 1024;
