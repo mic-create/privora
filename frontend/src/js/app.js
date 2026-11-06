@@ -16,6 +16,7 @@ function initializeApp() {
     setupNavigation();
     setupSessionListeners();
     setupRtcEventListeners();
+    setupVisibilityHandler();
 
     handleRoute();
     window.addEventListener('hashchange', handleRoute);
@@ -30,6 +31,20 @@ function setupNavigation() {
                 // Let hash routing handle it natively
             }
         });
+    });
+}
+
+function setupVisibilityHandler() {
+    // Automatically verify signaling and connection state when user returns to app after 1-2 minutes
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            console.log('[PRIVORA] App returned to foreground. Verifying active connections...');
+            if (!rtcManager.signalingClient.isConnected) {
+                rtcManager.signalingClient.connect().catch(err => {
+                    console.warn('[PRIVORA] Signaling reconnection attempt failed:', err);
+                });
+            }
+        }
     });
 }
 
@@ -112,7 +127,7 @@ function setupRtcEventListeners() {
         if (state === 'connected') {
             setState({ session: { ...getState().session, isConnected: true } });
             handleRoute();
-        } else if (state === 'failed' || state === 'disconnected') {
+        } else if (state === 'failed') {
             setState({ session: { ...getState().session, isConnected: false } });
             handleRoute();
         }

@@ -11,6 +11,7 @@ class WebRTCManager {
         this.isHost = false;
         this.iceCandidateQueue = [];
         this.connectionTimeout = null;
+        this.disconnectGraceTimer = null;
         
         // Cryptographic and Subkeys with Synchronization State
         this.sessionKey = null;
@@ -152,8 +153,18 @@ class WebRTCManager {
 
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection.connectionState;
+            console.log('[WebRTC] Connection state changed:', state);
             this._emit('connection_state_change', state);
-            if (state === 'connected') this._clearConnectionTimeout();
+
+            if (state === 'connected') {
+                this._clearConnectionTimeout();
+                this._clearDisconnectGracePeriod();
+            } else if (state === 'disconnected') {
+                // Give a generous 120-second grace period for mobile switching / background file picking
+                this._startDisconnectGracePeriod(120000);
+            } else if (state === 'failed') {
+                this._emit('connection_state_change', 'failed');
+            }
         };
 
         if (this.isHost) {
@@ -170,7 +181,8 @@ class WebRTCManager {
             };
         }
 
-        this._startConnectionTimeout();
+        // Extended initial connection timeout to 120 seconds (2 minutes)
+        this._startConnectionTimeout(120000);
         return this.peerConnection;
     }
 
@@ -180,6 +192,7 @@ class WebRTCManager {
 
         this.dataChannel.onopen = () => {
             this._clearConnectionTimeout();
+            this._clearDisconnectGracePeriod();
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
 
@@ -235,7 +248,7 @@ class WebRTCManager {
                                 localOrder: ++this.lastSeenSequence,
                                 timestamp: decrypted.timestamp || Date.now(),
                                 text: decrypted.text,
-                                direction: 'incoming', // Explicitly marked incoming
+                                direction: 'incoming',
                                 status: 'Delivered'
                             };
 
@@ -367,7 +380,7 @@ class WebRTCManager {
         const record = {
             ...chatPayload,
             localOrder,
-            direction: 'outgoing', // Explicitly marked outgoing for the sender
+            direction: 'outgoing',
             status: 'Sending'
         };
 
@@ -530,20 +543,37 @@ class WebRTCManager {
         this.lastSeenSequence = 0;
     }
 
-    _startConnectionTimeout() {
+    _startConnectionTimeout(durationMs = 120000) {
         this._clearConnectionTimeout();
         this.connectionTimeout = setTimeout(() => {
             if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
                 showToast('Connection attempt timed out', 'error');
                 this._emit('connection_state_change', 'failed');
             }
-        }, 30000);
+        }, durationMs);
     }
 
     _clearConnectionTimeout() {
         if (this.connectionTimeout) {
             clearTimeout(this.connectionTimeout);
             this.connectionTimeout = null;
+        }
+    }
+
+    _startDisconnectGracePeriod(durationMs = 120000) {
+        this._clearDisconnectGracePeriod();
+        this.disconnectGraceTimer = setTimeout(() => {
+            if (this.peerConnection && this.peerConnection.connectionState === 'disconnected') {
+                showToast('Connection lost after inactivity', 'error');
+                this._emit('connection_state_change', 'failed');
+            }
+        }, durationMs);
+    }
+
+    _clearDisconnectGracePeriod() {
+        if (this.disconnectGraceTimer) {
+            clearTimeout(this.disconnectGraceTimer);
+            this.disconnectGraceTimer = null;
         }
     }
 
@@ -608,6 +638,7 @@ class WebRTCManager {
 
     closeConnection() {
         this._clearConnectionTimeout();
+        this._clearDisconnectGracePeriod();
 
         if (this.dataChannel) {
             try { this.dataChannel.close(); } catch (e) {}
