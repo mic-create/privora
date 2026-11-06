@@ -1,32 +1,37 @@
-import { initRouter } from './core/router.js';
-import { initState, getState } from './core/state.js';
-import { initModalComponent } from './components/modal.component.js';
-import { initThemeToggle } from './utils/dom.js';
-import { showToast } from './utils/notifier.js';
+import { renderHome } from './components/home.component.js';
+import { renderTransfer } from './components/transfer.component.js';
+import { renderMessages } from './components/messages.component.js';
+import { renderSettings } from './components/settings.component.js';
+import { renderSecurityBadge } from './components/security.badge.component.js';
+import { getState } from './core/state.js';
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('[PRIVORA] Initializing Frontend WebRTC Engine v1.0.0');
+function router() {
+    const app = document.getElementById('app');
+    const hash = window.location.hash || '#home';
+    
+    app.innerHTML = '';
 
-    // Initialize state
-    initState();
+    // Inject Security Badge into header if present
+    const headerBadgeContainer = document.getElementById('header-security-badge');
+    if (headerBadgeContainer) {
+        headerBadgeContainer.innerHTML = '';
+        headerBadgeContainer.appendChild(renderSecurityBadge());
+    }
 
-    // Initialize Theme & UI toggles
-    initThemeToggle();
+    if (hash === '#home') {
+        app.appendChild(renderHome());
+    } else if (hash === '#transfer') {
+        app.appendChild(renderTransfer());
+    } else if (hash === '#messages') {
+        app.appendChild(renderMessages());
+    } else if (hash === '#settings') {
+        app.appendChild(renderSettings());
+    } else {
+        app.appendChild(renderHome());
+    }
+}
 
-    // Initialize Global Modals
-    initModalComponent();
-
-    // Initialize Client-side Router
-    initRouter();
-
-    // Bind Global Header Action Buttons
-    document.getElementById('btn-quick-start').addEventListener('click', () => {
-        window.location.hash = '#transfer';
-        showToast('Secure session workspace ready. Create a room.', 'info');
-    });
-
-    document.getElementById('btn-quick-join').addEventListener('click', () => {
-        window.location.hash = '#transfer';
-        showToast('Enter a room code or invitation link to connect.', 'info');
-    });
+window.addEventListener('hashchange', router);
+window.addEventListener('load', () => {
+    router();
 });
