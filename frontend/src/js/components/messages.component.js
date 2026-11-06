@@ -274,7 +274,6 @@ function renderMessagesList() {
         }
     });
 
-    // Real-time unified chronological sort by exact Unix timestamp ascending
     items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
     if (items.length === 0) {

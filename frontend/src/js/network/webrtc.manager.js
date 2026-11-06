@@ -236,7 +236,7 @@ class WebRTCManager {
                                 sequence: decrypted.sequence,
                                 timestamp: decrypted.timestamp || Date.now(),
                                 text: decrypted.text,
-                                direction: 'incoming',
+                                direction: 'incoming', // Explicitly marked as incoming
                                 status: 'Delivered'
                             };
 
@@ -371,13 +371,13 @@ class WebRTCManager {
             messageId,
             sequence,
             timestamp,
-            text,
-            direction: 'outgoing'
+            text
         };
 
         const encrypted = await encryptPayload(this.chatKey, chatPayload);
         const record = {
             ...chatPayload,
+            direction: 'outgoing', // Explicitly marked as outgoing locally
             status: 'Sending'
         };
 
@@ -434,7 +434,8 @@ class WebRTCManager {
                 sha256,
                 sentChunks: 0,
                 status: 'waiting_for_acceptance',
-                progress: 0
+                progress: 0,
+                direction: 'outgoing'
             };
 
             this.activeTransfers.set(transferId, transferRecord);
