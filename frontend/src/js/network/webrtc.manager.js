@@ -75,7 +75,6 @@ class WebRTCManager {
         this.chatKey = await deriveSubkey(masterKey, 'privora-salt-v1', 'privora-chat-encryption');
         this.fileKey = await deriveSubkey(masterKey, 'privora-salt-v1', 'privora-file-encryption');
         this.isKeySynchronized = isSynced;
-        console.log('[Crypto Diagnostic] HKDF subkeys derived successfully. Synchronized:', isSynced);
     }
 
     _setupSignalingListeners() {
@@ -212,7 +211,6 @@ class WebRTCManager {
                     showToast('Encryption keys synchronized securely', 'success');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
                     if (!this.chatKey) {
-                        console.warn('[Crypto Warning] Received chat message before chatKey was initialized.');
                         showToast('Waiting for key synchronization...', 'info');
                         return;
                     }
@@ -234,9 +232,10 @@ class WebRTCManager {
                                 type: 'CHAT_MESSAGE',
                                 messageId: decrypted.messageId,
                                 sequence: decrypted.sequence,
+                                localOrder: ++this.lastSeenSequence,
                                 timestamp: decrypted.timestamp || Date.now(),
                                 text: decrypted.text,
-                                direction: 'incoming', // Explicitly marked as incoming
+                                direction: 'incoming', // Explicitly marked incoming
                                 status: 'Delivered'
                             };
 
@@ -248,12 +247,9 @@ class WebRTCManager {
                                 found.status = 'Delivered';
                                 this._emit('chat_status_updated', found);
                             }
-                        } else {
-                            console.warn('Unknown decrypted packet subtype:', decrypted.type);
                         }
                     } catch (decErr) {
                         console.error('[Crypto Error] Decryption/Authentication failure:', decErr.message);
-                        showToast('Encrypted message failed tag authentication verification', 'error');
                     }
                 } else if (msg.type === 'TYPING_INDICATOR') {
                     this._emit('peer_typing', msg.isTyping);
@@ -282,18 +278,15 @@ class WebRTCManager {
                     if (transfer) {
                         transfer.status = 'declined';
                         this._emit('transfer_progress', transfer);
-                        showToast(`Peer declined file: ${transfer.name}`, 'error');
                     }
                 } else if (msg.type === 'FILE_CANCEL') {
                     this.incomingTransfers.delete(msg.transferId);
                     this._emit('transfer_cancelled', msg.transferId);
-                    showToast('Transfer cancelled by peer', 'info');
                 } else if (msg.type === 'TRANSFER_SUCCESS_ACK') {
                     const transfer = this.activeTransfers.get(msg.transferId);
                     if (transfer) {
                         transfer.status = 'completed';
                         this._emit('transfer_completed', transfer);
-                        showToast(`Successfully sent and verified ${transfer.name}`, 'success');
                     }
                 }
             } catch (err) {
@@ -333,21 +326,17 @@ class WebRTCManager {
                             transfer.blob = completeBlob;
                             transfer.status = 'completed';
                             this._emit('transfer_completed', transfer);
-                            showToast(`Verified & received ${transfer.name}`, 'success');
-
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({ type: 'TRANSFER_SUCCESS_ACK', transferId: transfer.transferId }));
                             }
                         } else {
                             transfer.status = 'failed';
                             this._emit('transfer_progress', transfer);
-                            showToast(`Hash verification failed for ${transfer.name}`, 'error');
                         }
                     }
                 }
             } catch (err) {
                 console.error('Failed to decrypt file chunk:', err);
-                showToast('File chunk decryption failed', 'error');
             }
         }
     }
@@ -363,13 +352,13 @@ class WebRTCManager {
         }
 
         const messageId = Math.random().toString(36).substring(2, 11);
-        const sequence = ++this.lastSeenSequence;
+        const localOrder = ++this.lastSeenSequence;
         const timestamp = Date.now();
 
         const chatPayload = {
             type: 'CHAT_MESSAGE',
             messageId,
-            sequence,
+            sequence: localOrder,
             timestamp,
             text
         };
@@ -377,7 +366,8 @@ class WebRTCManager {
         const encrypted = await encryptPayload(this.chatKey, chatPayload);
         const record = {
             ...chatPayload,
-            direction: 'outgoing', // Explicitly marked as outgoing locally
+            localOrder,
+            direction: 'outgoing', // Explicitly marked outgoing for the sender
             status: 'Sending'
         };
 
@@ -435,6 +425,7 @@ class WebRTCManager {
                 sentChunks: 0,
                 status: 'waiting_for_acceptance',
                 progress: 0,
+                localOrder: ++this.lastSeenSequence,
                 direction: 'outgoing'
             };
 
@@ -633,7 +624,6 @@ class WebRTCManager {
             this.roomId = null;
         }
 
-        // Reset cryptographic state
         this.sessionKey = null;
         this.sessionKeyBase64 = null;
         this.chatKey = null;
@@ -641,7 +631,6 @@ class WebRTCManager {
         this.isKeySynchronized = false;
         this.isHost = false;
 
-        // Reset transfer and chat states
         this.activeTransfers.clear();
         this.incomingTransfers.clear();
         this.chatMessages = [];

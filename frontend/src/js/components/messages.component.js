@@ -249,6 +249,7 @@ function renderMessagesList() {
             items.push({
                 type: 'FILE_TRANSFER_OUTGOING',
                 messageId: t.transferId,
+                localOrder: t.localOrder || 0,
                 timestamp: t.timestamp || Date.now(),
                 name: t.name,
                 size: t.size,
@@ -264,6 +265,7 @@ function renderMessagesList() {
             items.push({
                 type: 'FILE_TRANSFER_INCOMING',
                 messageId: t.transferId,
+                localOrder: t.localOrder || 0,
                 timestamp: t.timestamp || Date.now(),
                 name: t.name,
                 size: t.size,
@@ -274,7 +276,8 @@ function renderMessagesList() {
         }
     });
 
-    items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    // Sort strictly by local append sequence order to prevent clock skew / backdating issues
+    items.sort((a, b) => (a.localOrder || 0) - (b.localOrder || 0));
 
     if (items.length === 0) {
         return `
