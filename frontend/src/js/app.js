@@ -32,11 +32,10 @@ function setupNavigation() {
 function handleRoute() {
     const hash = window.location.hash.substring(1) || 'dashboard';
     
-    // Target both common container IDs to ensure content renders regardless of HTML wrapper ID
-    let container = document.getElementById('view-container') || document.getElementById('main-content-area');
+    // Target the correct viewport ID defined in index.html (#app-view)
+    let container = document.getElementById('app-view') || document.getElementById('view-container') || document.getElementById('main-content-area');
     
     if (!container) {
-        // Fallback: search for the main viewing pane next to the sidebar
         container = document.querySelector('main') || document.querySelector('.md\\:col-span-3') || document.querySelector('div.flex-1');
     }
 
