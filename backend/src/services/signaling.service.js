@@ -77,7 +77,6 @@ function handleCreateRoom(ws) {
 
     const roomId = crypto.randomBytes(4).toString('hex').toUpperCase();
     
-    // If a cleanup timer existed for this randomly generated room ID, clear it
     if (roomCleanupTimers.has(roomId)) {
         clearTimeout(roomCleanupTimers.get(roomId));
         roomCleanupTimers.delete(roomId);
@@ -85,6 +84,7 @@ function handleCreateRoom(ws) {
 
     rooms.set(roomId, new Set([ws]));
     clientRooms.set(ws, roomId);
+    ws.isRoomHost = true;
 
     logger.info('Room created successfully', { roomId });
     ws.send(JSON.stringify({ type: 'ROOM_CREATED', roomId }));
@@ -98,31 +98,39 @@ function handleJoinRoom(ws, roomId) {
     }
 
     const room = rooms.get(upperRoomId);
-    if (room.size >= 2) {
-        ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
-        return;
+
+    // Check if this socket is already registered in the room (reconnection safety)
+    if (!room.has(ws)) {
+        // If the host disconnected briefly and is returning, allow them back in even if size is 1 or 2
+        if (room.size >= 2) {
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
+            return;
+        }
     }
 
-    // Cancel the room destruction grace timer since someone is joining!
     if (roomCleanupTimers.has(upperRoomId)) {
         clearTimeout(roomCleanupTimers.get(upperRoomId));
         roomCleanupTimers.delete(upperRoomId);
         logger.info('Cancelled room expiration grace timer', { roomId: upperRoomId });
     }
 
-    handleDisconnect(ws);
+    // Clean any prior room mapping for this socket safely
+    const oldRoomId = clientRooms.get(ws);
+    if (oldRoomId && oldRoomId !== upperRoomId && rooms.has(oldRoomId)) {
+        rooms.get(oldRoomId).delete(ws);
+    }
 
     room.add(ws);
     clientRooms.set(ws, upperRoomId);
 
-    logger.info('Peer joined room', { roomId: upperRoomId, roomSize: room.size });
+    logger.info('Peer joined or re-linked room', { roomId: upperRoomId, roomSize: room.size });
     ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId: upperRoomId }));
 
-    // Notify existing peer in room using correct WebSocket.OPEN constant
+    // Notify other peer in room
     for (const peer of room) {
         if (peer !== ws && peer.readyState === WebSocket.OPEN) {
             peer.send(JSON.stringify({ type: 'PEER_JOINED' }));
-            logger.info('Dispatched PEER_JOINED to host', { roomId: upperRoomId });
+            logger.info('Dispatched PEER_JOINED to peer', { roomId: upperRoomId });
         }
     }
 }
@@ -156,7 +164,6 @@ function handleDisconnect(ws) {
             }
         }
 
-        // Instead of immediate deletion, start a 2-minute (120,000ms) grace period timer
         if (room.size === 0) {
             logger.info('Room is empty. Starting 2-minute expiration grace period', { roomId });
             
@@ -173,7 +180,7 @@ function handleDisconnect(ws) {
                     }
                 }
                 roomCleanupTimers.delete(roomId);
-            }, 120000); // 2 minutes
+            }, 120000); // 2 minutes grace period
 
             roomCleanupTimers.set(roomId, timer);
         }
