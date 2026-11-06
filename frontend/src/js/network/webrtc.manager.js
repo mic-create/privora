@@ -13,14 +13,12 @@ class WebRTCManager {
         this.connectionTimeout = null;
         this.disconnectGraceTimer = null;
         
-        // Cryptographic and Subkeys with Synchronization State
         this.sessionKey = null;
         this.sessionKeyBase64 = null;
         this.chatKey = null;
         this.fileKey = null;
         this.isKeySynchronized = false;
 
-        // Transfer & Chat State
         this.activeTransfers = new Map();
         this.incomingTransfers = new Map();
         this.chatMessages = [];
@@ -90,25 +88,22 @@ class WebRTCManager {
 
         this.signalingClient.on('room_joined', async (roomId) => {
             this.roomId = roomId;
-            this.isHost = false;
-            this.isKeySynchronized = false;
+            this.isHost = this.signalingClient.isHost;
             this._emit('room_joined', roomId);
-            // Ensure peer connection is ready to listen for data channel / offer
             this._createPeerConnection();
         });
 
         this.signalingClient.on('peer_joined', async () => {
             this._emit('peer_joined');
-            if (this.isHost) {
-                if (!this.peerConnection) this._createPeerConnection();
+            if (this.signalingClient.isHost) {
+                this._createPeerConnection(true); // Force fresh connection reset if needed
                 await this._createOffer();
             }
         });
 
         this.signalingClient.on('peer_left', () => {
             this._emit('peer_left');
-            showToast('Peer disconnected from room', 'info');
-            this.closeConnection();
+            showToast('Peer disconnected', 'info');
         });
 
         this.signalingClient.on('rtc_offer', async (offer) => {
@@ -137,11 +132,14 @@ class WebRTCManager {
         this.signalingClient.joinRoom(roomId);
     }
 
-    _createPeerConnection() {
-        if (this.peerConnection && (this.peerConnection.connectionState === 'connected' || this.peerConnection.connectionState === 'connecting')) {
+    _createPeerConnection(forceReset = false) {
+        if (!forceReset && this.peerConnection && (this.peerConnection.connectionState === 'connected' || this.peerConnection.connectionState === 'connecting')) {
             return this.peerConnection;
         }
-        if (this.peerConnection) this.peerConnection.close();
+
+        if (this.peerConnection) {
+            try { this.peerConnection.close(); } catch (e) {}
+        }
 
         this.peerConnection = new RTCPeerConnection(this.config);
         this.iceCandidateQueue = [];
@@ -167,16 +165,14 @@ class WebRTCManager {
             }
         };
 
-        if (this.isHost) {
+        if (this.signalingClient.isHost) {
             try {
-                // Host creates the data channel
                 this.dataChannel = this.peerConnection.createDataChannel('privora-data-channel', { ordered: true });
                 this._setupDataChannel();
             } catch (err) {
                 console.error('Failed to create data channel:', err);
             }
         } else {
-            // Guest listens for the data channel created by the host
             this.peerConnection.ondatachannel = (event) => {
                 this.dataChannel = event.channel;
                 this._setupDataChannel();
@@ -197,7 +193,7 @@ class WebRTCManager {
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
 
-            if (this.isHost && this.sessionKeyBase64) {
+            if (this.signalingClient.isHost && this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
         };
@@ -222,15 +218,11 @@ class WebRTCManager {
                 if (msg.type === 'KEY_EXCHANGE') {
                     const masterKey = await importSessionKey(msg.key);
                     await this._initSubkeys(masterKey, true);
-                    showToast('Encryption keys synchronized securely', 'success');
+                    showToast('Encryption keys synchronized', 'success');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
-                    if (!this.chatKey) {
-                        showToast('Waiting for key synchronization...', 'info');
-                        return;
-                    }
+                    if (!this.chatKey) return;
                     try {
                         const decrypted = await decryptPayload(this.chatKey, msg.iv, msg.ciphertext);
-                        
                         if (decrypted.type === 'CHAT_MESSAGE') {
                             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                                 this.dataChannel.send(JSON.stringify({
@@ -263,7 +255,7 @@ class WebRTCManager {
                             }
                         }
                     } catch (decErr) {
-                        console.error('[Crypto Error] Decryption/Authentication failure:', decErr.message);
+                        console.error('[Crypto Error]', decErr.message);
                     }
                 } else if (msg.type === 'TYPING_INDICATOR') {
                     this._emit('peer_typing', msg.isTyping);
@@ -304,7 +296,7 @@ class WebRTCManager {
                     }
                 }
             } catch (err) {
-                console.error('Failed to parse text message over DC:', err);
+                console.error('Data channel parse error:', err);
             }
         } else {
             try {
@@ -350,19 +342,19 @@ class WebRTCManager {
                     }
                 }
             } catch (err) {
-                console.error('Failed to decrypt file chunk:', err);
+                console.error('File chunk decryption failed:', err);
             }
         }
     }
 
     async sendChatMessage(text) {
         if (!this.isKeySynchronized || !this.chatKey) {
-            showToast('Encryption keys are still synchronizing. Please wait a moment.', 'error');
-            throw new Error('Key synchronization incomplete');
+            showToast('Encryption keys synchronizing...', 'error');
+            throw new Error('Key sync incomplete');
         }
 
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
-            throw new Error('DataChannel not open for messaging');
+            throw new Error('DataChannel not open');
         }
 
         const messageId = Math.random().toString(36).substring(2, 11);
@@ -414,7 +406,7 @@ class WebRTCManager {
 
     async sendFiles(files) {
         if (!this.isKeySynchronized || !this.fileKey) {
-            showToast('Encryption keys are still synchronizing. Please wait a moment.', 'error');
+            showToast('Encryption keys synchronizing...', 'error');
             return;
         }
 
@@ -548,7 +540,7 @@ class WebRTCManager {
         this._clearConnectionTimeout();
         this.connectionTimeout = setTimeout(() => {
             if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
-                showToast('Connection attempt timed out', 'error');
+                showToast('Connection timed out', 'error');
                 this._emit('connection_state_change', 'failed');
             }
         }, durationMs);
@@ -613,7 +605,6 @@ class WebRTCManager {
 
     async _handleIceCandidate(candidateData) {
         const candidate = new RTCIceCandidate(candidateData);
-        // Queue candidates safely if remote description isn't set yet to prevent connection failure
         if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
             try {
                 await this.peerConnection.addIceCandidate(candidate);

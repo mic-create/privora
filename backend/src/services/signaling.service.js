@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { validateSignalingMessage } from '../utils/validator.js';
 import { checkRateLimit } from '../middleware/rateLimit.middleware.js';
 
-const rooms = new Map(); // roomId -> { peers: Set, hostSocket: ws, cleanupTimer: null }
+const rooms = new Map(); // roomId -> { peers: Set, hostKey: string, hostSocket: ws, cleanupTimer: null }
 const clientRooms = new Map(); // WebSocket client -> roomId
 const clientIps = new Map(); // WebSocket client -> IP string
 
@@ -50,10 +50,10 @@ export function handleSignalingConnection(ws, req) {
 function routeMessage(ws, message) {
     switch (message.type) {
         case 'CREATE_ROOM':
-            handleCreateRoom(ws);
+            handleCreateRoom(ws, message.hostKey);
             break;
         case 'JOIN_ROOM':
-            handleJoinRoom(ws, message.roomId, message.isHostReconnection);
+            handleJoinRoom(ws, message.roomId, message.hostKey);
             break;
         case 'RTC_OFFER':
         case 'RTC_ANSWER':
@@ -71,24 +71,28 @@ function routeMessage(ws, message) {
     }
 }
 
-function handleCreateRoom(ws) {
+function handleCreateRoom(ws, hostKey) {
     handleDisconnect(ws);
 
     const roomId = crypto.randomBytes(4).toString('hex').toUpperCase();
-    
+    const resolvedHostKey = hostKey || crypto.randomUUID();
+
     rooms.set(roomId, {
         peers: new Set([ws]),
+        hostKey: resolvedHostKey,
         hostSocket: ws,
         cleanupTimer: null
     });
+
     clientRooms.set(ws, roomId);
     ws.isHost = true;
+    ws.hostKey = resolvedHostKey;
 
-    logger.info('Room created successfully by host', { roomId });
-    ws.send(JSON.stringify({ type: 'ROOM_CREATED', roomId }));
+    logger.info('Room created successfully by host', { roomId, hostKey: resolvedHostKey });
+    ws.send(JSON.stringify({ type: 'ROOM_CREATED', roomId, hostKey: resolvedHostKey }));
 }
 
-function handleJoinRoom(ws, roomId, isHostReconnection = false) {
+function handleJoinRoom(ws, roomId, providedHostKey) {
     const upperRoomId = roomId ? roomId.toUpperCase() : '';
     if (!upperRoomId || !rooms.has(upperRoomId)) {
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room does not exist or has expired' }));
@@ -97,33 +101,39 @@ function handleJoinRoom(ws, roomId, isHostReconnection = false) {
 
     const roomData = rooms.get(upperRoomId);
 
-    // Cancel any pending grace period destruction timer since activity occurred
+    // Cancel 2-minute grace cleanup timer if active
     if (roomData.cleanupTimer) {
         clearTimeout(roomData.cleanupTimer);
         roomData.cleanupTimer = null;
-        logger.info('Cancelled room expiration grace timer due to activity', { roomId: upperRoomId });
+        logger.info('Cancelled room expiration timer due to peer activity', { roomId: upperRoomId });
     }
 
-    // Check if this is the original host reconnecting
-    if (isHostReconnection || roomData.hostSocket === null || roomData.peers.size === 0) {
+    // Determine if this connecting client is the verified room Host returning
+    const isReturningHost = providedHostKey && roomData.hostKey === providedHostKey;
+
+    if (isReturningHost) {
+        // Rebind the host socket seamlessly without counting toward guest peer limits
         roomData.hostSocket = ws;
         ws.isHost = true;
+        ws.hostKey = providedHostKey;
     } else if (roomData.peers.size >= 2 && !roomData.peers.has(ws)) {
         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room is full (maximum 2 peers allowed)' }));
         return;
+    } else {
+        ws.isHost = false;
     }
 
     roomData.peers.add(ws);
     clientRooms.set(ws, upperRoomId);
 
-    logger.info('Peer joined or re-linked room', { roomId: upperRoomId, roomSize: roomData.peers.size, isHost: !!ws.isHost });
-    ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId: upperRoomId, isHost: !!ws.isHost }));
+    logger.info('Peer registered in room', { roomId: upperRoomId, roomSize: roomData.peers.size, isHost: ws.isHost });
+    ws.send(JSON.stringify({ type: 'ROOM_JOINED', roomId: upperRoomId, isHost: ws.isHost }));
 
-    // Notify other peers in the room
+    // Notify all other connected peers in the room to trigger/re-trigger WebRTC negotiation
     for (const peer of roomData.peers) {
         if (peer !== ws && peer.readyState === WebSocket.OPEN) {
             peer.send(JSON.stringify({ type: 'PEER_JOINED' }));
-            logger.info('Dispatched PEER_JOINED notification', { roomId: upperRoomId });
+            logger.info('Dispatched PEER_JOINED event', { roomId: upperRoomId });
         }
     }
 }
@@ -149,7 +159,7 @@ function handleDisconnect(ws) {
         const roomData = rooms.get(roomId);
         roomData.peers.delete(ws);
 
-        logger.info('Peer disconnected from room context', { roomId, remainingPeers: roomData.peers.size });
+        logger.info('Peer disconnected from signaling', { roomId, remainingPeers: roomData.peers.size });
 
         for (const peer of roomData.peers) {
             if (peer.readyState === WebSocket.OPEN) {
@@ -157,23 +167,20 @@ function handleDisconnect(ws) {
             }
         }
 
-        // If all peers left, start a 2-minute grace timer instead of immediate destruction
+        // Keep room alive for 2 minutes if empty so friends can join while host is away in another app
         if (roomData.peers.size === 0) {
-            logger.info('Room is empty. Starting 2-minute expiration grace period', { roomId });
+            logger.info('Room is empty. Starting 2-minute grace period timer...', { roomId });
             
             if (roomData.cleanupTimer) {
                 clearTimeout(roomData.cleanupTimer);
             }
 
             roomData.cleanupTimer = setTimeout(() => {
-                if (rooms.has(roomId)) {
-                    const currentRoom = rooms.get(roomId);
-                    if (currentRoom.peers.size === 0) {
-                        rooms.delete(roomId);
-                        logger.info('Room deleted due to expiration grace period timeout', { roomId });
-                    }
+                if (rooms.has(roomId) && rooms.get(roomId).peers.size === 0) {
+                    rooms.delete(roomId);
+                    logger.info('Room expired and deleted after 2-minute grace period', { roomId });
                 }
-            }, 120000); // 2 minutes
+            }, 120000);
         }
     }
 

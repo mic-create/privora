@@ -8,8 +8,9 @@ export class SignalingClient {
         this.listeners = new Map();
         this.isConnected = false;
         this.pingInterval = null;
-        this.currentRoomId = null;
-        this.isHost = false;
+        this.currentRoomId = sessionStorage.getItem('privora_active_room') || null;
+        this.hostKey = sessionStorage.getItem('privora_host_key') || null;
+        this.isHost = sessionStorage.getItem('privora_is_host') === 'true';
     }
 
     connect() {
@@ -26,10 +27,10 @@ export class SignalingClient {
 
                 this.ws.onopen = () => {
                     this.isConnected = true;
-                    console.log('[Signaling] Connected successfully to WebSocket server');
+                    console.log('[Signaling] Connected successfully');
                     this._startHeartbeat();
 
-                    // If user returns from background, rejoin room with host status preserved
+                    // Automatically restore session identity if returning from background app switch
                     if (this.currentRoomId) {
                         this.rejoinSession();
                     }
@@ -42,13 +43,13 @@ export class SignalingClient {
                         const message = JSON.parse(event.data);
                         this._handleMessage(message);
                     } catch (err) {
-                        console.error('[Signaling] Failed to parse incoming message:', err);
+                        console.error('[Signaling] Failed to parse message:', err);
                     }
                 };
 
                 this.ws.onclose = () => {
                     this.isConnected = false;
-                    console.warn('[Signaling] Disconnected from WebSocket server');
+                    console.warn('[Signaling] WebSocket closed');
                     this._stopHeartbeat();
                     this._emit('disconnect');
                 };
@@ -79,50 +80,67 @@ export class SignalingClient {
 
     _handleMessage(message) {
         const { type, ...payload } = message;
-        console.log('[Signaling] Received message type:', type, payload);
+        console.log('[Signaling] Received message:', type, payload);
 
         switch (type) {
             case 'ROOM_CREATED':
                 this.currentRoomId = payload.roomId;
+                this.hostKey = payload.hostKey;
                 this.isHost = true;
+                
+                sessionStorage.setItem('privora_active_room', payload.roomId);
+                sessionStorage.setItem('privora_host_key', payload.hostKey);
+                sessionStorage.setItem('privora_is_host', 'true');
+
                 this._emit('room_created', payload.roomId);
                 break;
+
             case 'ROOM_JOINED':
                 this.currentRoomId = payload.roomId;
                 if (payload.isHost !== undefined) {
                     this.isHost = payload.isHost;
+                    sessionStorage.setItem('privora_is_host', payload.isHost ? 'true' : 'false');
                 }
+                sessionStorage.setItem('privora_active_room', payload.roomId);
                 this._emit('room_joined', payload.roomId);
                 break;
+
             case 'PEER_JOINED':
                 this._emit('peer_joined', payload);
                 break;
+
             case 'PEER_LEFT':
                 this._emit('peer_left', payload);
                 break;
+
             case 'RTC_OFFER':
                 this._emit('rtc_offer', payload.offer);
                 break;
+
             case 'RTC_ANSWER':
                 this._emit('rtc_answer', payload.answer);
                 break;
+
             case 'ICE_CANDIDATE':
                 this._emit('ice_candidate', payload.candidate);
                 break;
+
             case 'ERROR':
-                showToast(payload.message || 'Signaling error occurred', 'error');
+                showToast(payload.message || 'Signaling error', 'error');
                 this._emit('error', payload);
                 break;
+
             case 'PONG':
                 break;
+
             default:
-                console.warn('[Signaling] Unhandled message type:', type);
+                console.warn('[Signaling] Unhandled message:', type);
         }
     }
 
     send(type, payload = {}) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.error('[Signaling] Cannot send message, WebSocket is not open');
+            console.error('[Signaling] Cannot send message: WebSocket closed');
             return false;
         }
 
@@ -133,18 +151,21 @@ export class SignalingClient {
 
     createRoom() {
         this.isHost = true;
-        return this.send('CREATE_ROOM');
+        const generatedHostKey = crypto.randomUUID();
+        this.hostKey = generatedHostKey;
+        sessionStorage.setItem('privora_host_key', generatedHostKey);
+        return this.send('CREATE_ROOM', { hostKey: generatedHostKey });
     }
 
-    joinRoom(roomId, isHostReconnection = false) {
+    joinRoom(roomId) {
         this.currentRoomId = roomId;
-        return this.send('JOIN_ROOM', { roomId, isHostReconnection });
+        return this.send('JOIN_ROOM', { roomId, hostKey: this.hostKey });
     }
 
     rejoinSession() {
         if (this.currentRoomId && this.ws && this.ws.readyState === WebSocket.OPEN) {
-            console.log(`[Signaling] Re-linking session for Room #${this.currentRoomId} (Host: ${this.isHost})`);
-            this.send('JOIN_ROOM', { roomId: this.currentRoomId, isHostReconnection: this.isHost });
+            console.log(`[Signaling] Restoring session for Room #${this.currentRoomId}`);
+            this.send('JOIN_ROOM', { roomId: this.currentRoomId, hostKey: this.hostKey });
         }
     }
 
@@ -162,8 +183,16 @@ export class SignalingClient {
 
     leaveRoom(roomId) {
         this.send('LEAVE_ROOM', { roomId: roomId || this.currentRoomId });
+        this.clearSessionData();
+    }
+
+    clearSessionData() {
         this.currentRoomId = null;
+        this.hostKey = null;
         this.isHost = false;
+        sessionStorage.removeItem('privora_active_room');
+        sessionStorage.removeItem('privora_host_key');
+        sessionStorage.removeItem('privora_is_host');
     }
 
     disconnect() {
@@ -172,6 +201,7 @@ export class SignalingClient {
             this.ws = null;
         }
         this._stopHeartbeat();
+        this.clearSessionData();
     }
 
     _startHeartbeat() {
