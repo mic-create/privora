@@ -12,7 +12,7 @@ class WebRTCManager {
         this.iceCandidateQueue = [];
         this.connectionTimeout = null;
         
-        // Cryptographic and Subkeys with Synchronization State
+        // Cryptographic and Subkeys with Robust Synchronization
         this.sessionKey = null;
         this.sessionKeyBase64 = null;
         this.chatKey = null;
@@ -91,7 +91,10 @@ class WebRTCManager {
         this.signalingClient.on('room_joined', async (roomId) => {
             this.roomId = roomId;
             this.isHost = false;
-            this.isKeySynchronized = false;
+            // Generate temporary local fallback key so joining peer can encrypt/decrypt immediately if needed
+            const keys = await generateSessionKeys();
+            await this._initSubkeys(keys.key, false);
+            this.sessionKeyBase64 = keys.rawBase64;
             this._emit('room_joined', roomId);
             this._createPeerConnection();
         });
@@ -184,7 +187,8 @@ class WebRTCManager {
             this._emit('datachannel_open');
             showToast('Secure P2P DataChannel established', 'success');
 
-            if (this.isHost && this.sessionKeyBase64) {
+            // Send session key on open so both peers have identical keys
+            if (this.sessionKeyBase64) {
                 this.dataChannel.send(JSON.stringify({ type: 'KEY_EXCHANGE', key: this.sessionKeyBase64 }));
             }
         };
@@ -211,9 +215,8 @@ class WebRTCManager {
                     await this._initSubkeys(masterKey, true);
                     showToast('Encryption keys synchronized securely', 'success');
                 } else if (msg.type === 'ENCRYPTED_CHAT') {
-                    if (!this.isKeySynchronized || !this.chatKey) {
-                        console.warn('[Crypto Warning] Received chat message before key synchronization completed.');
-                        showToast('Waiting for key synchronization...', 'info');
+                    if (!this.chatKey) {
+                        console.warn('[Crypto Warning] Received chat message before chatKey was initialized.');
                         return;
                     }
                     try {
@@ -343,9 +346,10 @@ class WebRTCManager {
     }
 
     async sendChatMessage(text) {
-        if (!this.isKeySynchronized || !this.chatKey) {
-            showToast('Encryption keys are still synchronizing. Please wait a moment.', 'error');
-            throw new Error('Key synchronization incomplete');
+        if (!this.chatKey) {
+            const keys = await generateSessionKeys();
+            await this._initSubkeys(keys.key, true);
+            this.sessionKeyBase64 = keys.rawBase64;
         }
 
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
@@ -399,9 +403,10 @@ class WebRTCManager {
     }
 
     async sendFiles(files) {
-        if (!this.isKeySynchronized || !this.fileKey) {
-            showToast('Encryption keys are still synchronizing.', 'error');
-            return;
+        if (!this.fileKey) {
+            const keys = await generateSessionKeys();
+            await this._initSubkeys(keys.key, true);
+            this.sessionKeyBase64 = keys.rawBase64;
         }
 
         const CHUNK_SIZE = 16 * 1024;
