@@ -153,7 +153,11 @@ class WebRTCManager {
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection.connectionState;
             this._emit('connection_state_change', state);
-            if (state === 'connected') this._clearConnectionTimeout();
+            if (state === 'connected') {
+                this._clearConnectionTimeout();
+            } else if (state === 'disconnected') {
+                console.warn('[WebRTC] Connection temporarily disconnected. Entering recovery grace period...');
+            }
         };
 
         if (this.isHost) {
@@ -531,12 +535,13 @@ class WebRTCManager {
 
     _startConnectionTimeout() {
         this._clearConnectionTimeout();
+        // Extended timeout to 120 seconds to allow mobile background/file picker suspension without destroying peer state
         this.connectionTimeout = setTimeout(() => {
             if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
                 showToast('Connection attempt timed out', 'error');
                 this._emit('connection_state_change', 'failed');
             }
-        }, 30000);
+        }, 120000);
     }
 
     _clearConnectionTimeout() {

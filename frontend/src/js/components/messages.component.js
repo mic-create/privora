@@ -288,7 +288,7 @@ export function renderMessages() {
         if (transferId) {
             rtcManager.declineTransfer(transferId);
             incomingBanner.classList.add('hidden');
-            showToast('File transfer declined', 'error');
+            showToast('File transfer declined', 'info');
         }
     });
 
