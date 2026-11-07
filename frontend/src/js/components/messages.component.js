@@ -109,7 +109,7 @@ export function renderMessages() {
             <div id="chat-messages-container" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-1 bg-ivory-800/40">
                 <div class="flex justify-center mb-4">
                     <div class="px-3.5 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
-                        🔒 Messages and calls are end-to-end encrypted.
+                        🔒 Messages are end-to-end encrypted.
                     </div>
                 </div>
                 ${renderMessagesList()}
@@ -318,6 +318,7 @@ export function renderMessages() {
             e.stopPropagation();
             const messageId = menuBtn.dataset.messageId;
             const dropdown = messagesContainer.querySelector(`#menu-dropdown-${messageId}`);
+            // Close all other dropdowns first
             messagesContainer.querySelectorAll('.message-dropdown').forEach(d => {
                 if (d !== dropdown) d.classList.add('hidden');
             });
@@ -338,6 +339,7 @@ export function renderMessages() {
                 attachBtn.setAttribute('disabled', 'true');
                 previewContainer.classList.add('hidden');
             }
+            // Close dropdowns
             messagesContainer.querySelectorAll('.message-dropdown').forEach(d => d.classList.add('hidden'));
             return;
         }
@@ -350,6 +352,7 @@ export function renderMessages() {
             return;
         }
 
+        // Click outside closes dropdowns
         messagesContainer.querySelectorAll('.message-dropdown').forEach(d => d.classList.add('hidden'));
     });
 
@@ -508,6 +511,7 @@ function renderMessagesList() {
             `;
         }
 
+        // Chat Message Bubble with WhatsApp-style Action Menu
         const messageId = item.messageId || '';
         const editedLabel = item.edited ? `<span class="text-[9px] italic opacity-80 mr-1">edited</span>` : '';
 
@@ -525,10 +529,12 @@ function renderMessagesList() {
                         </div>
                     </div>
 
-                    <button data-message-id="${messageId}" class="message-menu-btn absolute ${isOutgoing ? '-left-6' : '-right-6'} top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-charcoal-muted hover:text-charcoal bg-white/80 rounded-md shadow-xs border border-border">
+                    <!-- Action Menu Trigger Button (Appears on hover or touch) -->
+                    <button data-message-Id="${messageId}" class="message-menu-btn absolute ${isOutgoing ? '-left-6' : '-right-6'} top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-charcoal-muted hover:text-charcoal bg-white/80 rounded-md shadow-xs border border-border">
                         <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
                     </button>
 
+                    <!-- Dropdown Menu -->
                     <div id="menu-dropdown-${messageId}" class="message-dropdown hidden absolute ${isOutgoing ? 'right-0' : 'left-0'} top-8 z-30 w-36 bg-white border border-border rounded-xl shadow-lg py-1 animate-fade-in text-xs text-charcoal">
                         ${isOutgoing ? `<button data-message-id="${messageId}" class="action-edit-msg w-full px-3 py-1.5 text-left hover:bg-ivory-800 flex items-center gap-2">Edit Message</button>` : ''}
                         <button data-text="${escapeHtml(item.text || '')}" class="action-copy-msg w-full px-3 py-1.5 text-left hover:bg-ivory-800 flex items-center gap-2">Copy Message</button>
@@ -562,7 +568,7 @@ function refreshChatDOM(container) {
         messagesContainer.innerHTML = `
             <div class="flex justify-center mb-4">
                 <div class="px-3.5 py-1.5 rounded-full bg-white border border-border text-[10px] text-charcoal-muted font-mono shadow-2xs">
-                    🔒 Messages and calls are end-to-end encrypted.
+                    🔒 Messages are end-to-end encrypted.
                 </div>
             </div>
             ${renderMessagesList()}
@@ -578,4 +584,4 @@ function refreshChatDOM(container) {
 
 function escapeHtml(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-}.
+}
