@@ -6,6 +6,7 @@ let typingTimeout = null;
 let selectedFilesToAttach = [];
 let showMobileChat = false;
 let searchQuery = '';
+let editingMessageId = null;
 
 export function renderMessages() {
     const state = getState();
@@ -145,6 +146,17 @@ export function renderMessages() {
                 <span class="text-[10px] text-charcoal-muted font-mono hidden sm:inline">Ready to send encrypted</span>
             </div>
 
+            <!-- Editing Banner Indicator Area -->
+            <div id="editing-banner-area" class="px-4 py-2 bg-ivory-700 border-t border-border flex items-center justify-between ${editingMessageId ? '' : 'hidden'}">
+                <div class="flex items-center gap-2 text-xs text-forest-800 font-medium">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    </svg>
+                    <span>Editing message</span>
+                </div>
+                <button id="btn-cancel-edit" class="text-xs text-charcoal-muted hover:text-charcoal font-bold px-2 py-0.5">&times; Cancel</button>
+            </div>
+
             <!-- Typing Indicator -->
             <div id="typing-indicator-area" class="px-6 py-1 text-[11px] text-forest-800 font-mono italic hidden bg-white border-t border-border/50">
                 Peer is typing...
@@ -154,14 +166,14 @@ export function renderMessages() {
             <div class="p-3 sm:p-4 border-t border-border bg-white">
                 <form id="chat-form" class="flex items-center gap-2 sm:gap-3">
                     <input type="file" id="chat-file-input" multiple class="hidden">
-                    <button type="button" id="btn-attach-file" ${!isConnected ? 'disabled' : ''} class="p-2.5 bg-ivory-800 hover:bg-ivory-900 text-charcoal border border-border rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs flex-shrink-0" title="Attach files">
+                    <button type="button" id="btn-attach-file" ${!isConnected || editingMessageId ? 'disabled' : ''} class="p-2.5 bg-ivory-800 hover:bg-ivory-900 text-charcoal border border-border rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs flex-shrink-0" title="Attach files">
                         <svg class="w-4 h-4 text-forest-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
                         </svg>
                     </button>
-                    <input type="text" id="chat-input" ${!isConnected ? 'disabled' : ''} placeholder="${isConnected ? 'Type an encrypted message...' : 'Connect to a room to start messaging...'}" class="flex-1 bg-ivory-800 border border-border rounded-xl px-4 py-2.5 text-xs text-charcoal placeholder:text-charcoal-muted focus:outline-none focus:border-forest-800 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <button type="submit" ${!isConnected ? 'disabled' : ''} class="px-4 py-2.5 bg-forest-800 hover:bg-forest-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center gap-2 flex-shrink-0">
-                        <span class="hidden sm:inline">Send</span>
+                    <input type="text" id="chat-input" ${!isConnected ? 'disabled' : ''} placeholder="${isConnected ? (editingMessageId ? 'Edit message...' : 'Type an encrypted message...') : 'Connect to a room to start messaging...'}" class="flex-1 bg-ivory-800 border border-border rounded-xl px-4 py-2.5 text-xs text-charcoal placeholder:text-charcoal-muted focus:outline-none focus:border-forest-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <button type="submit" ${!isConnected ? 'disabled' : ''} id="chat-submit-btn" class="px-4 py-2.5 bg-forest-800 hover:bg-forest-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded-xl shadow-md transition-all flex items-center gap-2 flex-shrink-0">
+                        <span id="chat-submit-text" class="hidden sm:inline">${editingMessageId ? 'Save' : 'Send'}</span>
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
                         </svg>
@@ -184,6 +196,9 @@ export function renderMessages() {
     const searchInput = container.querySelector('#conversation-search');
     const mobileBackBtn = container.querySelector('#btn-mobile-back');
     const activeSessionItem = container.querySelector('#active-session-item');
+    const editingBanner = container.querySelector('#editing-banner-area');
+    const cancelEditBtn = container.querySelector('#btn-cancel-edit');
+    const submitTextSpan = container.querySelector('#chat-submit-text');
 
     const incomingBanner = container.querySelector('#incoming-transfer-banner');
     const incomingFileName = container.querySelector('#incoming-file-name');
@@ -210,8 +225,19 @@ export function renderMessages() {
         refreshChatDOM(container);
     });
 
+    // Cancel Editing handler
+    cancelEditBtn.addEventListener('click', () => {
+        editingMessageId = null;
+        chatInput.value = '';
+        editingBanner.classList.add('hidden');
+        submitTextSpan.textContent = 'Send';
+        attachBtn.removeAttribute('disabled');
+    });
+
     // Attachment Actions
-    attachBtn.addEventListener('click', () => fileInput.click());
+    attachBtn.addEventListener('click', () => {
+        if (!editingMessageId) fileInput.click();
+    });
 
     fileInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -229,41 +255,105 @@ export function renderMessages() {
 
     // Typing Indicators
     chatInput.addEventListener('input', () => {
-        rtcManager.sendTypingIndicator(true);
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => {
-            rtcManager.sendTypingIndicator(false);
-        }, 1500);
+        if (!editingMessageId) {
+            rtcManager.sendTypingIndicator(true);
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+                rtcManager.sendTypingIndicator(false);
+            }, 1500);
+        }
     });
 
-    // Submit Handler
+    // Submit Handler (Supports both Sending & Editing)
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
 
         try {
-            if (selectedFilesToAttach.length > 0) {
-                const filesToSend = [...selectedFilesToAttach];
-                selectedFilesToAttach = [];
-                fileInput.value = '';
-                previewContainer.classList.add('hidden');
-                await rtcManager.sendFiles(filesToSend);
-            }
-            if (text) {
+            if (editingMessageId) {
+                if (!text) {
+                    showToast('Edited message cannot be empty', 'error');
+                    return;
+                }
+                const msgIdToEdit = editingMessageId;
+                editingMessageId = null;
                 chatInput.value = '';
-                await rtcManager.sendChatMessage(text);
+                editingBanner.classList.add('hidden');
+                submitTextSpan.textContent = 'Send';
+                attachBtn.removeAttribute('disabled');
+
+                await rtcManager.editChatMessage(msgIdToEdit, text);
+            } else {
+                if (selectedFilesToAttach.length > 0) {
+                    const filesToSend = [...selectedFilesToAttach];
+                    selectedFilesToAttach = [];
+                    fileInput.value = '';
+                    previewContainer.classList.add('hidden');
+                    await rtcManager.sendFiles(filesToSend);
+                }
+                if (text) {
+                    chatInput.value = '';
+                    await rtcManager.sendChatMessage(text);
+                }
             }
             refreshChatDOM(container);
         } catch (err) {
-            showToast('Failed to send message or attachment', 'error');
+            showToast('Failed to save message or edit', 'error');
         }
     });
 
     // Clear Conversation
     container.querySelector('#btn-clear-chat').addEventListener('click', () => {
         rtcManager.clearConversation();
+        editingMessageId = null;
+        chatInput.value = '';
         refreshChatDOM(container);
         showToast('Conversation cleared', 'info');
+    });
+
+    // Event Delegation for Message Action Menus (Edit / Copy)
+    messagesContainer.addEventListener('click', (e) => {
+        const menuBtn = e.target.closest('.message-menu-btn');
+        if (menuBtn) {
+            e.stopPropagation();
+            const messageId = menuBtn.dataset.messageId;
+            const dropdown = messagesContainer.querySelector(`#menu-dropdown-${messageId}`);
+            // Close all other dropdowns first
+            messagesContainer.querySelectorAll('.message-dropdown').forEach(d => {
+                if (d !== dropdown) d.classList.add('hidden');
+            });
+            dropdown.classList.toggle('hidden');
+            return;
+        }
+
+        const editAction = e.target.closest('.action-edit-msg');
+        if (editAction) {
+            const messageId = editAction.dataset.messageId;
+            const targetMsg = (rtcManager.chatMessages || []).find(m => m.messageId === messageId);
+            if (targetMsg && targetMsg.direction === 'outgoing') {
+                editingMessageId = messageId;
+                chatInput.value = targetMsg.text;
+                chatInput.focus();
+                editingBanner.classList.remove('hidden');
+                submitTextSpan.textContent = 'Save';
+                attachBtn.setAttribute('disabled', 'true');
+                previewContainer.classList.add('hidden');
+            }
+            // Close dropdowns
+            messagesContainer.querySelectorAll('.message-dropdown').forEach(d => d.classList.add('hidden'));
+            return;
+        }
+
+        const copyAction = e.target.closest('.action-copy-msg');
+        if (copyAction) {
+            const text = copyAction.dataset.text;
+            navigator.clipboard.writeText(text).then(() => showToast('Message copied to clipboard', 'success'));
+            messagesContainer.querySelectorAll('.message-dropdown').forEach(d => d.classList.add('hidden'));
+            return;
+        }
+
+        // Click outside closes dropdowns
+        messagesContainer.querySelectorAll('.message-dropdown').forEach(d => d.classList.add('hidden'));
     });
 
     // RTC Event Listeners
@@ -288,7 +378,7 @@ export function renderMessages() {
         if (transferId) {
             rtcManager.declineTransfer(transferId);
             incomingBanner.classList.add('hidden');
-            showToast('File transfer declined', 'info');
+            showToast('File transfer declined', 'error');
         }
     });
 
@@ -297,6 +387,7 @@ export function renderMessages() {
     rtcManager.on('transfer_initiated', () => refreshChatDOM(container));
     rtcManager.on('chat_message_received', () => refreshChatDOM(container));
     rtcManager.on('chat_message_sent', () => refreshChatDOM(container));
+    rtcManager.on('chat_message_edited', () => refreshChatDOM(container));
     rtcManager.on('chat_status_updated', () => refreshChatDOM(container));
 
     rtcManager.on('peer_typing', (isTyping) => {
@@ -340,7 +431,7 @@ function renderMessagesList() {
         });
     });
 
-    // Chronological sequence sorting using localOrder to maintain order correctly
+    // Chronological sequence sorting using localOrder
     items.sort((a, b) => (a.localOrder || 0) - (b.localOrder || 0));
 
     // Search filter
@@ -420,16 +511,36 @@ function renderMessagesList() {
             `;
         }
 
+        // Chat Message Bubble with WhatsApp-style Action Menu
+        const messageId = item.messageId || '';
+        const editedLabel = item.edited ? `<span class="text-[9px] italic opacity-80 mr-1">edited</span>` : '';
+
         return `
-            <div class="flex items-end gap-2 ${marginClass} ${isOutgoing ? 'justify-end' : 'justify-start'}">
+            <div class="flex items-end gap-2 ${marginClass} ${isOutgoing ? 'justify-end' : 'justify-start'} group relative">
                 ${!isOutgoing && !isPrevSameSender ? '<div class="h-6 w-6 rounded-full bg-ivory-800 border border-border flex items-center justify-center text-[10px] text-charcoal font-mono flex-shrink-0 font-bold mb-0.5">P2</div>' : (!isOutgoing ? '<div class="w-6"></div>' : '')}
-                <div class="${isOutgoing ? 'bg-forest-800 text-white' : 'bg-white text-charcoal border border-border'} ${roundedClass} px-3.5 py-2 max-w-md shadow-2xs">
-                    <p class="text-xs break-words leading-relaxed ${isOutgoing ? 'text-white' : 'text-charcoal'}">${escapeHtml(item.text || '')}</p>
-                    <div class="flex items-center justify-end gap-1.5 mt-0.5">
-                        <span class="text-[9px] ${isOutgoing ? 'text-ivory-900/80' : 'text-charcoal-muted'} font-mono">${timeStr}</span>
-                        ${isOutgoing ? `<span class="text-[9px] font-mono text-ivory-900/80">✓</span>` : ''}
+                
+                <div class="relative">
+                    <div class="${isOutgoing ? 'bg-forest-800 text-white' : 'bg-white text-charcoal border border-border'} ${roundedClass} px-3.5 py-2 max-w-md shadow-2xs">
+                        <p class="text-xs break-words leading-relaxed ${isOutgoing ? 'text-white' : 'text-charcoal'}">${escapeHtml(item.text || '')}</p>
+                        <div class="flex items-center justify-end gap-1.5 mt-0.5">
+                            ${editedLabel}
+                            <span class="text-[9px] ${isOutgoing ? 'text-ivory-900/80' : 'text-charcoal-muted'} font-mono">${timeStr}</span>
+                            ${isOutgoing ? `<span class="text-[9px] font-mono text-ivory-900/80">✓</span>` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Action Menu Trigger Button (Appears on hover or touch) -->
+                    <button data-message-Id="${messageId}" class="message-menu-btn absolute ${isOutgoing ? '-left-6' : '-right-6'} top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-charcoal-muted hover:text-charcoal bg-white/80 rounded-md shadow-xs border border-border">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                    </button>
+
+                    <!-- Dropdown Menu -->
+                    <div id="menu-dropdown-${messageId}" class="message-dropdown hidden absolute ${isOutgoing ? 'right-0' : 'left-0'} top-8 z-30 w-36 bg-white border border-border rounded-xl shadow-lg py-1 animate-fade-in text-xs text-charcoal">
+                        ${isOutgoing ? `<button data-message-id="${messageId}" class="action-edit-msg w-full px-3 py-1.5 text-left hover:bg-ivory-800 flex items-center gap-2">Edit Message</button>` : ''}
+                        <button data-text="${escapeHtml(item.text || '')}" class="action-copy-msg w-full px-3 py-1.5 text-left hover:bg-ivory-800 flex items-center gap-2">Copy Message</button>
                     </div>
                 </div>
+
                 ${isOutgoing && !isPrevSameSender ? '<div class="h-6 w-6 rounded-full bg-ivory-800 border border-border flex items-center justify-center text-[10px] text-forest-800 font-mono flex-shrink-0 font-bold mb-0.5">ME</div>' : (isOutgoing ? '<div class="w-6"></div>' : '')}
             </div>
         `;

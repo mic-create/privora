@@ -240,11 +240,20 @@ class WebRTCManager {
                                 timestamp: decrypted.timestamp || Date.now(),
                                 text: decrypted.text,
                                 direction: 'incoming',
-                                status: 'Delivered'
+                                status: 'Delivered',
+                                edited: false
                             };
 
                             this.chatMessages.push(incomingRecord);
                             this._emit('chat_message_received', incomingRecord);
+                        } else if (decrypted.type === 'EDIT_MESSAGE') {
+                            const found = this.chatMessages.find(m => m.messageId === decrypted.messageId);
+                            if (found) {
+                                found.text = decrypted.text;
+                                found.edited = true;
+                                found.editedAt = decrypted.editedAt || Date.now();
+                                this._emit('chat_message_edited', found);
+                            }
                         } else if (decrypted.type === 'CHAT_ACK') {
                             const found = this.chatMessages.find(m => m.messageId === decrypted.messageId);
                             if (found) {
@@ -373,7 +382,8 @@ class WebRTCManager {
             ...chatPayload,
             localOrder,
             direction: 'outgoing',
-            status: 'Sending'
+            status: 'Sending',
+            edited: false
         };
 
         this.chatMessages.push(record);
@@ -393,6 +403,48 @@ class WebRTCManager {
         }, 5000);
 
         return record;
+    }
+
+    async editChatMessage(messageId, newText) {
+        if (!this.isKeySynchronized || !this.chatKey) {
+            showToast('Encryption keys are still synchronizing.', 'error');
+            throw new Error('Key synchronization incomplete');
+        }
+
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+            throw new Error('DataChannel not open for editing');
+        }
+
+        const targetMsg = this.chatMessages.find(m => m.messageId === messageId && m.direction === 'outgoing');
+        if (!targetMsg) {
+            throw new Error('Message not found or cannot edit incoming message');
+        }
+
+        if (targetMsg.text === newText) {
+            return targetMsg; // Unchanged
+        }
+
+        targetMsg.text = newText;
+        targetMsg.edited = true;
+        targetMsg.editedAt = Date.now();
+
+        const editPayload = {
+            type: 'EDIT_MESSAGE',
+            messageId,
+            text: newText,
+            editedAt: targetMsg.editedAt
+        };
+
+        const encrypted = await encryptPayload(this.chatKey, editPayload);
+
+        this.dataChannel.send(JSON.stringify({
+            type: 'ENCRYPTED_CHAT',
+            ...encrypted
+        }));
+
+        this._emit('chat_message_edited', targetMsg);
+        showToast('Message edited successfully', 'success');
+        return targetMsg;
     }
 
     async sendTypingIndicator(isTyping) {
@@ -535,7 +587,6 @@ class WebRTCManager {
 
     _startConnectionTimeout() {
         this._clearConnectionTimeout();
-        // Extended timeout to 120 seconds to allow mobile background/file picker suspension without destroying peer state
         this.connectionTimeout = setTimeout(() => {
             if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
                 showToast('Connection attempt timed out', 'error');
